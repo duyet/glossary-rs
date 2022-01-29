@@ -71,3 +71,5 @@ jobs:
           tags: |
             ghcr.io/duyet/glossary:latest
             ghcr.io/duyet/glossary:0.1.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
