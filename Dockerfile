@@ -22,8 +22,6 @@ RUN apt-get update && apt-get install libpq5 -y
 ENV DATABASE_URL postgres://postgres:5432/postgres
 
 # Copy from build stage
-COPY --from=builder \
-     /app/target/release/insights_glossary \
-    api
+COPY --from=builder /app/target/release/glossary api
 EXPOSE 8080
 CMD ["/app/api"]
