@@ -1,6 +1,7 @@
 # Glossary API
 
-Glossary services API written in Rust by [actix-web](https://actix.rs) and PostgreSQL.
+Open-Source Glossary API Service written in Rust, 
+powered by [actix-web](https://actix.rs) and [diesel](https://diesel.rs).
 
 # Development
 
