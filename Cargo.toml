@@ -1,0 +1,21 @@
+[package]
+name = "glossary"
+version = "0.1.0"
+edition = "2021"
+authors = ["Duyet <me@duyet.net>"]
+
+[dependencies]
+actix-cors = "0.5"
+actix-web = "3"
+actix-web-validator = "2.2.0"
+chrono = { version = "0.4", features = ["serde"] }
+diesel = {version = "1", features = ["postgres", "extras"]}
+dotenv = "0.15"
+env_logger = "0.9"
+log = "0.4"
+serde = "1"
+uuid = { version = "0.6", features = ["serde", "v4"] }
+validator = { version = "0.12", features = ["derive"] }
+
+[dev-dependencies]
+actix-rt = "2"
