@@ -1,10 +1,11 @@
-use actix_web::{delete, get, post, put, web, HttpResponse};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
 use actix_web_validator::Json;
+use ammonia::clean;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::result::Error;
 use diesel::{ExpressionMethods, GroupByDsl, QueryDsl, RunQueryDsl};
 use diesel::{Insertable, Queryable};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -17,6 +18,8 @@ use crate::schema::*;
 use crate::{DBPool, DBPooledConnection};
 
 pub type Glossaries = ListResp<Glossary>;
+
+const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user-email";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Glossary {
@@ -94,9 +97,20 @@ impl GlossaryDB {
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct GlossaryRequest {
     #[validate(required, length(min = 1, max = 255))]
+    #[serde(deserialize_with = "cleanup_string")]
     pub term: Option<String>,
     #[validate(required)]
+    #[serde(deserialize_with = "cleanup_string")]
     pub definition: Option<String>,
+}
+
+fn cleanup_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    let s = clean(s.trim());
+    Ok(Some(s.to_string()))
 }
 
 impl GlossaryRequest {
@@ -120,6 +134,7 @@ fn list_glossary(conn: &DBPooledConnection) -> Result<Vec<GlossaryDB>, Error> {
 fn create_glossary(
     conn: &DBPooledConnection,
     value: Json<GlossaryRequest>,
+    who: Option<String>,
 ) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
@@ -135,7 +150,7 @@ fn create_glossary(
         &conn2,
         created.term.to_string(),
         created.definition.to_string(),
-        None,
+        who,
         created.revision,
         created.id,
     );
@@ -153,6 +168,7 @@ fn update_glossary(
     conn: &DBPooledConnection,
     _id: Uuid,
     value: Glossary,
+    who: Option<String>,
 ) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
@@ -173,7 +189,7 @@ fn update_glossary(
         conn,
         updated.term.to_string(),
         updated.definition.to_string(),
-        None,
+        who,
         updated.revision,
         updated.id,
     );
@@ -269,14 +285,21 @@ pub async fn update(
     pool: web::Data<DBPool>,
     web::Path(id): web::Path<String>,
     Json(value): Json<GlossaryRequest>,
+    req: HttpRequest,
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
+
+    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
+        Some(email) => Some(email.to_str().unwrap().to_string()),
+        _ => None,
+    };
 
     match web::block(move || {
         update_glossary(
             &conn,
             Uuid::from_str(id.as_str()).unwrap(),
             value.to_glossary().unwrap(),
+            who,
         )
     })
     .await
@@ -303,12 +326,18 @@ pub async fn delete(
 /// Create a new glossary
 #[post("/glossary")]
 pub async fn create(
-    req: Json<GlossaryRequest>,
+    json: Json<GlossaryRequest>,
+    req: HttpRequest,
     pool: web::Data<DBPool>,
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
-    match web::block(move || create_glossary(&conn, req)).await {
+    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
+        Some(email) => Some(email.to_str().unwrap().to_string()),
+        _ => None,
+    };
+
+    match web::block(move || create_glossary(&conn, json, who)).await {
         Ok(result) => Ok(HttpResponse::Ok().json(result.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
