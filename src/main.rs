@@ -7,8 +7,8 @@ use dotenv::dotenv;
 use log::info;
 use std::env;
 
-use glossary::v1;
 use glossary::response;
+use glossary::v1;
 
 #[get("/")]
 pub async fn index() -> impl Responder {
@@ -38,9 +38,8 @@ async fn main() -> std::io::Result<()> {
         .build(manager)
         .expect("Failed to create connection pool");
 
-
     let server = HttpServer::new(move || {
-        let cors = Cors::default();
+        let cors = Cors::default().allow_any_origin();
 
         App::new()
             .data(pool.clone())
