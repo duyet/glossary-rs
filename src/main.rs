@@ -52,6 +52,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/api/v1/")
                     .service(v1::glossary::list)
+                    .service(v1::glossary::list_popular)
                     .service(v1::glossary::get)
                     .service(v1::glossary::update)
                     .service(v1::glossary::delete)
