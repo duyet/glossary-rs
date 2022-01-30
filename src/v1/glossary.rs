@@ -2,7 +2,8 @@ use actix_web::{delete, get, post, put, web, HttpResponse};
 use actix_web_validator::Json;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::result::Error;
-use diesel::{ExpressionMethods, Insertable, QueryDsl, Queryable, RunQueryDsl};
+use diesel::{ExpressionMethods, GroupByDsl, QueryDsl, RunQueryDsl};
+use diesel::{Insertable, Queryable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -112,10 +113,7 @@ impl GlossaryRequest {
 fn list_glossary(conn: &DBPooledConnection) -> Result<Vec<GlossaryDB>, Error> {
     use crate::schema::glossary::dsl::*;
 
-    match glossary.order(term.asc()).load(conn) {
-        Ok(glossaries) => Ok(glossaries),
-        Err(e) => Err(e),
-    }
+    glossary.order(term.asc()).load(conn)
 }
 
 fn create_glossary(
@@ -177,6 +175,35 @@ fn delete_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<(), Error> {
     Ok(())
 }
 
+fn list_popular_glossary(
+    conn: &DBPooledConnection,
+    limit: Option<u8>,
+) -> Result<Vec<Glossary>, Error> {
+    use diesel::dsl;
+    use diesel::pg::expression::dsl::any;
+
+    let limit = limit.unwrap_or(10);
+
+    // Most likes glossaries
+    let most_glossary_id_by_count = likes::table
+        .select(likes::columns::glossary_id)
+        .order(dsl::count_star().desc())
+        .group_by(likes::columns::glossary_id)
+        .limit(limit as i64)
+        .load::<Uuid>(conn)?;
+
+    // Get glossaries in the list
+    let glossaries = glossary::table
+        .filter(glossary::columns::id.eq(any(most_glossary_id_by_count)))
+        .load::<GlossaryDB>(conn)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.to_glossary())
+        .collect();
+
+    Ok(glossaries)
+}
+
 /// List all glossaries
 #[get("/glossary")]
 pub async fn list(pool: web::Data<DBPool>) -> Result<HttpResponse, ErrorResp> {
@@ -195,7 +222,7 @@ pub async fn list(pool: web::Data<DBPool>) -> Result<HttpResponse, ErrorResp> {
             glossaries.into_iter().for_each(|a| {
                 let likes = list_likes(&conn, Uuid::from_str(&a.id.to_string()).unwrap()).unwrap();
 
-                let character = a.term.chars().next().unwrap();
+                let character = a.term.chars().next().unwrap().to_uppercase();
                 let b = glossaries_by_alphabet
                     .entry(character.to_string())
                     .or_insert_with(Vec::new);
@@ -269,6 +296,31 @@ pub async fn create(
 
     match web::block(move || create_glossary(&conn, req)).await {
         Ok(result) => Ok(HttpResponse::Ok().json(result.to_glossary())),
+        Err(e) => Err(ErrorResp::new(&e.to_string())),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PopularQuery {
+    pub limit: Option<u8>,
+}
+
+/// List popular glossaries
+#[get("/glossary-popular")]
+pub async fn list_popular(
+    pool: web::Data<DBPool>,
+    query: web::Query<PopularQuery>,
+) -> Result<HttpResponse, ErrorResp> {
+    let conn = pool.get().expect("could not get db connection from pool");
+
+    let glossaries = web::block(move || {
+        let limit = query.limit;
+        list_popular_glossary(&conn, limit)
+    })
+    .await;
+
+    match glossaries {
+        Ok(glossaries) => Ok(HttpResponse::Ok().json(glossaries)),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
