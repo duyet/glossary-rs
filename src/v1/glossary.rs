@@ -10,6 +10,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 use validator::Validate;
 
+use super::glossary_history::create_glossary_history;
 use super::like::{list_likes, Like};
 use crate::response::{ErrorResp, ListResp, Message};
 use crate::schema::*;
@@ -94,7 +95,7 @@ impl GlossaryDB {
 pub struct GlossaryRequest {
     #[validate(required, length(min = 1, max = 255))]
     pub term: Option<String>,
-    #[validate(required, length(min = 1))]
+    #[validate(required)]
     pub definition: Option<String>,
 }
 
@@ -123,48 +124,61 @@ fn create_glossary(
     use crate::schema::glossary::dsl::*;
 
     let _glossary = value.into_inner().to_glossary().unwrap();
+    let conn2 = conn.clone();
 
     let created = diesel::insert_into(glossary)
         .values(_glossary.to_glossary_db())
         .returning((id, term, definition, revision, created_at, updated_at))
         .get_result::<GlossaryDB>(conn)?;
 
+    create_glossary_history(
+        &conn2,
+        created.term.to_string(),
+        created.definition.to_string(),
+        None,
+        created.revision,
+        created.id,
+    );
+
     Ok(created)
 }
 
-fn get_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<Glossary, Error> {
+fn get_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
-    match glossary.filter(id.eq(_id)).load::<GlossaryDB>(conn) {
-        Ok(g) => match g.first() {
-            Some(gg) => Ok(Glossary::new(gg.term.clone(), gg.definition.clone())),
-            None => Err(Error::NotFound),
-        },
-        Err(e) => Err(e),
-    }
+    glossary.filter(id.eq(_id)).first::<GlossaryDB>(conn)
 }
 
 fn update_glossary(
     conn: &DBPooledConnection,
     _id: Uuid,
     value: Glossary,
-) -> Result<Glossary, Error> {
+) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
     let mut _glossary = value.to_glossary_db();
-    _glossary.revision += 1;
     _glossary.updated_at = Utc::now().naive_utc();
 
-    let _ = diesel::update(glossary.find(_id))
+    let updated = diesel::update(glossary.find(_id))
         .set((
             term.eq(_glossary.term),
             definition.eq(_glossary.definition),
-            revision.eq(_glossary.revision),
+            revision.eq(revision + 1),
             updated_at.eq(_glossary.updated_at),
         ))
-        .execute(conn);
+        .returning((id, term, definition, revision, created_at, updated_at))
+        .get_result::<GlossaryDB>(conn)?;
 
-    Ok(value)
+    create_glossary_history(
+        conn,
+        updated.term.to_string(),
+        updated.definition.to_string(),
+        None,
+        updated.revision,
+        updated.id,
+    );
+
+    Ok(updated)
 }
 
 fn delete_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<(), Error> {
@@ -244,7 +258,7 @@ pub async fn get(
     let conn = pool.get().expect("could not get db connection from pool");
 
     match web::block(move || get_glossary(&conn, Uuid::from_str(id.as_str()).unwrap())).await {
-        Ok(g) => Ok(HttpResponse::Ok().json(g)),
+        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -267,7 +281,7 @@ pub async fn update(
     })
     .await
     {
-        Ok(g) => Ok(HttpResponse::Ok().json(g)),
+        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
