@@ -1,0 +1,1 @@
+ALTER TABLE likes DROP COLUMN who;

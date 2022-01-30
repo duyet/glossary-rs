@@ -19,8 +19,6 @@ use crate::{DBPool, DBPooledConnection};
 
 pub type Glossaries = ListResp<Glossary>;
 
-const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user-email";
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Glossary {
     pub id: String,
@@ -110,7 +108,7 @@ where
 {
     let s: &str = Deserialize::deserialize(deserializer)?;
     let s = clean(s.trim());
-    Ok(Some(s.to_string()))
+    Ok(Some(s))
 }
 
 impl GlossaryRequest {
@@ -139,7 +137,6 @@ fn create_glossary(
     use crate::schema::glossary::dsl::*;
 
     let _glossary = value.into_inner().to_glossary().unwrap();
-    let conn2 = conn.clone();
 
     let created = diesel::insert_into(glossary)
         .values(_glossary.to_glossary_db())
@@ -147,7 +144,7 @@ fn create_glossary(
         .get_result::<GlossaryDB>(conn)?;
 
     create_glossary_history(
-        &conn2,
+        conn,
         created.term.to_string(),
         created.definition.to_string(),
         who,
@@ -172,15 +169,12 @@ fn update_glossary(
 ) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
-    let mut _glossary = value.to_glossary_db();
-    _glossary.updated_at = Utc::now().naive_utc();
-
     let updated = diesel::update(glossary.find(_id))
         .set((
-            term.eq(_glossary.term),
-            definition.eq(_glossary.definition),
+            term.eq(value.term),
+            definition.eq(value.definition),
             revision.eq(revision + 1),
-            updated_at.eq(_glossary.updated_at),
+            updated_at.eq(Utc::now().naive_utc()),
         ))
         .returning((id, term, definition, revision, created_at, updated_at))
         .get_result::<GlossaryDB>(conn)?;
@@ -289,10 +283,10 @@ pub async fn update(
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
-    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
-        Some(email) => Some(email.to_str().unwrap().to_string()),
-        _ => None,
-    };
+    let who = req
+        .headers()
+        .get(crate::AUTHENTICATED_USER_HEADER)
+        .map(|email| email.to_str().unwrap().to_string());
 
     match web::block(move || {
         update_glossary(
@@ -332,10 +326,10 @@ pub async fn create(
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
-    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
-        Some(email) => Some(email.to_str().unwrap().to_string()),
-        _ => None,
-    };
+    let who = req
+        .headers()
+        .get(crate::AUTHENTICATED_USER_HEADER)
+        .map(|email| email.to_str().unwrap().to_string());
 
     match web::block(move || create_glossary(&conn, json, who)).await {
         Ok(result) => Ok(HttpResponse::Ok().json(result.to_glossary())),

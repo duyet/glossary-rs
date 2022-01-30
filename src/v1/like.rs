@@ -16,19 +16,21 @@ pub type Likes = ListResp<Like>;
 pub struct Like {
     pub id: String,
     pub created_at: DateTime<Utc>,
+    pub who: Option<String>,
 }
 
 impl Default for Like {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl Like {
-    pub fn new() -> Self {
+    pub fn new(who: Option<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             created_at: Utc::now(),
+            who,
         }
     }
 
@@ -37,6 +39,7 @@ impl Like {
             id: Uuid::from_str(self.id.as_str()).unwrap(),
             created_at: self.created_at.naive_utc(),
             glossary_id,
+            who: self.who.clone(),
         }
     }
 }
@@ -47,6 +50,7 @@ pub struct LikeDB {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
     pub glossary_id: Uuid,
+    pub who: Option<String>,
 }
 
 impl LikeDB {
@@ -54,6 +58,7 @@ impl LikeDB {
         Like {
             id: self.id.to_string(),
             created_at: DateTime::<Utc>::from_utc(self.created_at, Utc),
+            who: self.who.clone(),
         }
     }
 }
@@ -71,10 +76,14 @@ pub fn list_likes(conn: &DBPooledConnection, _glossary_id: Uuid) -> Result<Vec<L
     }
 }
 
-pub fn create_like(conn: &DBPooledConnection, _glossary_id: Uuid) -> Result<Like, ErrorResp> {
+pub fn create_like(
+    conn: &DBPooledConnection,
+    _glossary_id: Uuid,
+    _who: Option<String>,
+) -> Result<Like, ErrorResp> {
     use crate::schema::likes::dsl::*;
 
-    let like = Like::new();
+    let like = Like::new(_who);
 
     let _ = diesel::insert_into(likes)
         .values(&like.to_like_db(_glossary_id))
@@ -137,11 +146,17 @@ pub async fn list(
 pub async fn plus_one(
     web::Path(path): web::Path<(String,)>,
     pool: web::Data<DBPool>,
+    req: web::HttpRequest,
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
+    let who = req
+        .headers()
+        .get(crate::AUTHENTICATED_USER_HEADER)
+        .map(|email| email.to_str().unwrap().to_string());
+
     let glossary_id = Uuid::from_str(&path.0).expect("could not parse glossary id");
-    let like = web::block(move || create_like(&conn, glossary_id)).await;
+    let like = web::block(move || create_like(&conn, glossary_id, who)).await;
 
     match like {
         Ok(like) => Ok(HttpResponse::Ok().json(like)),

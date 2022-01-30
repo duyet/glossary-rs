@@ -26,6 +26,7 @@ table! {
         id -> Uuid,
         created_at -> Timestamp,
         glossary_id -> Uuid,
+        who -> Nullable<Varchar>,
     }
 }
 
