@@ -1,7 +1,11 @@
-# Glossary API
-
-Open-Source Glossary API Service written in Rust, 
-powered by [actix-web](https://actix.rs) and [diesel](https://diesel.rs).
+<div align="center">
+  <img src=".github/logo.png" alt="Glossary Logo" width="100" />
+  <h1>Glossary API</h1>
+  <p>
+    Open-Source Glossary API Service written in Rust, 
+    powered by https://actix.rs and https://diesel.rs.
+  </p>
+</div>
 
 # Development
 
