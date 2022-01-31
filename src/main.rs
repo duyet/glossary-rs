@@ -24,6 +24,9 @@ pub async fn ping() -> impl Responder {
     HttpResponse::Ok().body("pong")
 }
 
+// Embed the migration into the binary
+embed_migrations!("./migrations");
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     env::set_var("RUST_LOG", "actix_web=debug,actix_server=info");
@@ -42,8 +45,7 @@ async fn main() -> std::io::Result<()> {
         .build(manager)
         .expect("Failed to create connection pool");
 
-    // Migration schema
-    embed_migrations!("./migrations");
+    // Start migration if needed
     let conn = pool.get().expect("could not get db connection from pool");
     embedded_migrations::run_with_output(&conn, &mut std::io::stdout()).unwrap();
 

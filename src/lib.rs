@@ -1,11 +1,13 @@
 #[macro_use]
 extern crate diesel;
-extern crate actix_web_validator;
+#[macro_use]
 extern crate diesel_migrations;
+extern crate actix_web_validator;
 extern crate dotenv;
 
 pub mod response;
 pub mod schema;
+pub mod test_utils;
 pub mod v1;
 
 pub use diesel::pg::PgConnection;

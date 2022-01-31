@@ -2,6 +2,7 @@ use actix_web::error::ResponseError;
 use actix_web::{error, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use thiserror::Error;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ListResp<T> {
@@ -50,13 +51,19 @@ impl Message {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Error, Deserialize, Serialize)]
 pub struct ErrorResp {
     pub error: String,
 }
 
 impl ErrorResp {
     pub fn new(error: &str) -> Self {
+        Self {
+            error: error.to_string(),
+        }
+    }
+
+    pub fn from(error: diesel::result::Error) -> Self {
         Self {
             error: error.to_string(),
         }
