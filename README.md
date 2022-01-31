@@ -7,6 +7,21 @@
   </p>
 </div>
 
+# Endpoints
+
+| Method | Endpoint | What it does |
+| ------ | -------- | -------------|
+| GET | ```/api/v1/glossary``` | Returns a dictionary of glossary with key is the first character of glossary terms.
+| GET | ```/api/v1/glossary-popular``` | Returns an array of most popular terms by likes.
+| GET |  ```/api/v1/glossary/{id}``` | Return the glossary term and defintion.
+| POST | ```/api/v1/glossary``` | Create a new glossary with `term` and `defintion`.
+| PUT | ```/api/v1/glossary/{id}``` | Update a glossary.
+| DELETE | ```/api/v1/glossary/{id}``` | Delete a glossary.
+| GET | ```/api/v1/glossary/{id}/likes``` | Return an array of likes for a glossary.
+| POST | ```/api/v1/glossary/{id}/likes``` | Create a like for a glossary.
+| DELETE | ```/api/v1/glossary/{id}/likes``` | Delete a like from a glossary.
+
+
 # Development
 
 ## Prerequisites
@@ -61,6 +76,23 @@ cargo test
 
 # Deployment
 
+## Using Docker image
+
+Deploy using docker image from https://github.com/duyet/glossary/pkgs/container/glossary
+
+```bash
+docker run -it \
+  -e DATABASE_URL=postgres://postgres:5432/glossary \
+  -p 8080:8080 \
+  ghcr.io/duyet/glossary:0.1.0
+```
+
+## Using Helm chart
+
+TBU
+
+## Building Docker image from source
+
 Build and deploy by using docker:
 
 ```bash
@@ -68,7 +100,10 @@ docker build -t glossary .
 ```
 
 ```bash
-docker run -it -e DATABASE_URL=postgres://<database> -p 8080:8080 glossary 
+docker run -it \
+  -e DATABASE_URL=postgres://postgres:5432/glossary \
+  -p 8080:8080 \
+  glossary 
 ```
 
 # License
