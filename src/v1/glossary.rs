@@ -1,21 +1,25 @@
-use actix_web::{delete, get, post, put, web, HttpResponse};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
 use actix_web_validator::Json;
+use ammonia::clean;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::result::Error;
 use diesel::{ExpressionMethods, GroupByDsl, QueryDsl, RunQueryDsl};
 use diesel::{Insertable, Queryable};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
 use validator::Validate;
 
+use super::glossary_history::create_glossary_history;
 use super::like::{list_likes, Like};
 use crate::response::{ErrorResp, ListResp, Message};
 use crate::schema::*;
 use crate::{DBPool, DBPooledConnection};
 
 pub type Glossaries = ListResp<Glossary>;
+
+const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user-email";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Glossary {
@@ -93,9 +97,20 @@ impl GlossaryDB {
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct GlossaryRequest {
     #[validate(required, length(min = 1, max = 255))]
+    #[serde(deserialize_with = "cleanup_string")]
     pub term: Option<String>,
-    #[validate(required, length(min = 1))]
+    #[validate(required)]
+    #[serde(deserialize_with = "cleanup_string")]
     pub definition: Option<String>,
+}
+
+fn cleanup_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    let s = clean(s.trim());
+    Ok(Some(s.to_string()))
 }
 
 impl GlossaryRequest {
@@ -119,52 +134,67 @@ fn list_glossary(conn: &DBPooledConnection) -> Result<Vec<GlossaryDB>, Error> {
 fn create_glossary(
     conn: &DBPooledConnection,
     value: Json<GlossaryRequest>,
+    who: Option<String>,
 ) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
     let _glossary = value.into_inner().to_glossary().unwrap();
+    let conn2 = conn.clone();
 
     let created = diesel::insert_into(glossary)
         .values(_glossary.to_glossary_db())
         .returning((id, term, definition, revision, created_at, updated_at))
         .get_result::<GlossaryDB>(conn)?;
 
+    create_glossary_history(
+        &conn2,
+        created.term.to_string(),
+        created.definition.to_string(),
+        who,
+        created.revision,
+        created.id,
+    );
+
     Ok(created)
 }
 
-fn get_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<Glossary, Error> {
+fn get_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
-    match glossary.filter(id.eq(_id)).load::<GlossaryDB>(conn) {
-        Ok(g) => match g.first() {
-            Some(gg) => Ok(Glossary::new(gg.term.clone(), gg.definition.clone())),
-            None => Err(Error::NotFound),
-        },
-        Err(e) => Err(e),
-    }
+    glossary.filter(id.eq(_id)).first::<GlossaryDB>(conn)
 }
 
 fn update_glossary(
     conn: &DBPooledConnection,
     _id: Uuid,
     value: Glossary,
-) -> Result<Glossary, Error> {
+    who: Option<String>,
+) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
     let mut _glossary = value.to_glossary_db();
-    _glossary.revision += 1;
     _glossary.updated_at = Utc::now().naive_utc();
 
-    let _ = diesel::update(glossary.find(_id))
+    let updated = diesel::update(glossary.find(_id))
         .set((
             term.eq(_glossary.term),
             definition.eq(_glossary.definition),
-            revision.eq(_glossary.revision),
+            revision.eq(revision + 1),
             updated_at.eq(_glossary.updated_at),
         ))
-        .execute(conn);
+        .returning((id, term, definition, revision, created_at, updated_at))
+        .get_result::<GlossaryDB>(conn)?;
 
-    Ok(value)
+    create_glossary_history(
+        conn,
+        updated.term.to_string(),
+        updated.definition.to_string(),
+        who,
+        updated.revision,
+        updated.id,
+    );
+
+    Ok(updated)
 }
 
 fn delete_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<(), Error> {
@@ -244,7 +274,7 @@ pub async fn get(
     let conn = pool.get().expect("could not get db connection from pool");
 
     match web::block(move || get_glossary(&conn, Uuid::from_str(id.as_str()).unwrap())).await {
-        Ok(g) => Ok(HttpResponse::Ok().json(g)),
+        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -255,19 +285,26 @@ pub async fn update(
     pool: web::Data<DBPool>,
     web::Path(id): web::Path<String>,
     Json(value): Json<GlossaryRequest>,
+    req: HttpRequest,
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
+
+    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
+        Some(email) => Some(email.to_str().unwrap().to_string()),
+        _ => None,
+    };
 
     match web::block(move || {
         update_glossary(
             &conn,
             Uuid::from_str(id.as_str()).unwrap(),
             value.to_glossary().unwrap(),
+            who,
         )
     })
     .await
     {
-        Ok(g) => Ok(HttpResponse::Ok().json(g)),
+        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -289,12 +326,18 @@ pub async fn delete(
 /// Create a new glossary
 #[post("/glossary")]
 pub async fn create(
-    req: Json<GlossaryRequest>,
+    json: Json<GlossaryRequest>,
+    req: HttpRequest,
     pool: web::Data<DBPool>,
 ) -> Result<HttpResponse, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
-    match web::block(move || create_glossary(&conn, req)).await {
+    let who = match req.headers().get(AUTHENTICATED_USER_HEADER) {
+        Some(email) => Some(email.to_str().unwrap().to_string()),
+        _ => None,
+    };
+
+    match web::block(move || create_glossary(&conn, json, who)).await {
         Ok(result) => Ok(HttpResponse::Ok().json(result.to_glossary())),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }

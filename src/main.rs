@@ -1,8 +1,12 @@
+#[macro_use]
+extern crate diesel_migrations;
+
 use actix_cors::Cors;
 use actix_web::{get, web, HttpResponse, Responder};
 use actix_web::{middleware, App, HttpServer};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel_migrations::embed_migrations;
 use dotenv::dotenv;
 use log::info;
 use std::env;
@@ -38,8 +42,16 @@ async fn main() -> std::io::Result<()> {
         .build(manager)
         .expect("Failed to create connection pool");
 
+    // Migration schema
+    embed_migrations!("./migrations");
+    let conn = pool.get().expect("could not get db connection from pool");
+    embedded_migrations::run_with_output(&conn, &mut std::io::stdout()).unwrap();
+
     let server = HttpServer::new(move || {
-        let cors = Cors::default().allow_any_origin();
+        let cors = Cors::default()
+            .allow_any_header()
+            .allow_any_origin()
+            .allow_any_method();
 
         App::new()
             .data(pool.clone())

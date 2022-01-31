@@ -12,7 +12,7 @@ COPY Cargo.toml Cargo.toml
 RUN cargo fetch
 
 # Copy and compile
-COPY src src
+COPY . .
 RUN cargo build --release
 
 # Run stage
