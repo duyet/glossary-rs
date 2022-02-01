@@ -12,7 +12,7 @@ use crate::{DBPool, DBPooledConnection};
 
 pub type Likes = ListResp<Like>;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Eq, PartialEq)]
 pub struct Like {
     pub id: String,
     pub created_at: DateTime<Utc>,
@@ -177,5 +177,276 @@ pub async fn minus_one(
     match web::block(move || delete_one_like(&conn, glossary_id, None)).await {
         Ok(_) => Ok(HttpResponse::Ok().json(Message::new("ok"))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
+    }
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{BodyTest, TestContext};
+    use crate::v1::glossary::GlossaryDB;
+    use actix_web::{test, App};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    // Insert a glossary into database. Using the list likes to get the list of likes. The count
+    // should be 0.
+    #[actix_rt::test]
+    async fn test_list_like_zero() {
+        use crate::schema::glossary;
+
+        let ctx = TestContext::new("test_create_like");
+        let pool = ctx.get_pool();
+        let conn = pool.get().expect("could not get db connection from pool");
+
+        let glossary_id = Uuid::new_v4();
+        let item_1 = GlossaryDB {
+            id: glossary_id,
+            term: "test_term_1".to_string(),
+            revision: 1,
+            definition: "test_definition_1".to_string(),
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        };
+
+        // Insert glossary item into database
+        diesel::insert_into(glossary::table)
+            .values(item_1)
+            .execute(&conn)
+            .expect("could not insert glossary");
+
+        // Init api test server
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .service(list)
+                .service(plus_one)
+                .service(minus_one),
+        )
+        .await;
+
+        // Get the list of likes with GET /glossary/{id}/likes
+        let req = test::TestRequest::get()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let mut resp = test::call_service(&mut app, req).await;
+
+        // Response should be OK
+        assert!(resp.status().is_success());
+
+        // Response should be application/json
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+
+        // Count should be 0 because there is no like
+        let body = resp.take_body().as_str().to_owned();
+        let response: Likes = serde_json::from_str(&body).unwrap();
+        assert_eq!(response.count, 0);
+    }
+
+    // Insert a glossary into database. Using the plus_one to create a like.
+    // Using the list likes to get the list of likes. The count should be 1.
+    #[actix_rt::test]
+    async fn test_list_like_with_one_like() {
+        use crate::schema::glossary;
+
+        let ctx = TestContext::new("test_list_like_with_one_like");
+        let pool = ctx.get_pool();
+        let conn = pool.get().expect("could not get db connection from pool");
+
+        let glossary_id = Uuid::new_v4();
+
+        let item_1 = GlossaryDB {
+            id: glossary_id,
+            term: "test_term_1".to_string(),
+            revision: 1,
+            definition: "test_definition_1".to_string(),
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        };
+
+        // Insert two glossaries
+        diesel::insert_into(glossary::table)
+            .values(item_1)
+            .execute(&conn)
+            .expect("could not insert glossary");
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .service(list)
+                .service(plus_one)
+                .service(minus_one),
+        )
+        .await;
+
+        // Create a like using api POST /glossary/{glossary_id}/likes
+        let req = test::TestRequest::post()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        // Should be ok
+        let resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Get the list of likes using GET /glossary/{glossary_id}/likes
+        let req = test::TestRequest::get()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let mut resp = test::call_service(&mut app, req).await;
+
+        // Response should be OK
+        assert!(resp.status().is_success());
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+
+        // Count should be 1 because there is one like
+        let body = resp.take_body().as_str().to_owned();
+        let response: Likes = serde_json::from_str(&body).unwrap();
+        assert_eq!(response.count, 1);
+    }
+
+    // Insert a glossary into database. Using the plus_one to create a like.
+    // Using the plus_one to create a like.
+    // Using the list likes to get the list of likes. The count should be 2.
+    #[actix_rt::test]
+    async fn test_list_like_with_two_likes() {
+        use crate::schema::glossary;
+
+        let ctx = TestContext::new("test_list_like_with_two_likes");
+        let pool = ctx.get_pool();
+        let conn = pool.get().expect("could not get db connection from pool");
+
+        let glossary_id = Uuid::new_v4();
+
+        let item_1 = GlossaryDB {
+            id: glossary_id,
+            term: "test_term_1".to_string(),
+            revision: 1,
+            definition: "test_definition_1".to_string(),
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        };
+
+        // Insert two glossaries
+        diesel::insert_into(glossary::table)
+            .values(item_1)
+            .execute(&conn)
+            .expect("could not insert glossary");
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .service(list)
+                .service(plus_one)
+                .service(minus_one),
+        )
+        .await;
+
+        // Create the fist like using api POST /glossary/{glossary_id}/likes
+        let req = test::TestRequest::post()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Create the 2nd like using api POST /glossary/{glossary_id}/likes
+        let req = test::TestRequest::post()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Get the list of likes using GET /glossary/{glossary_id}/likes
+        let req = test::TestRequest::get()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+
+        let mut resp = test::call_service(&mut app, req).await;
+        let body = resp.take_body().as_str().to_owned();
+        let response: Likes = serde_json::from_str(&body).unwrap();
+        assert_eq!(response.count, 2);
+    }
+
+    // Insert a glossary into database.
+    // Using the plus_one to create a like.
+    // Using the list likes to get the list of likes. The count should be 1.
+    // Using minus_one to delete the like.
+    // Using the list likes to get the list of likes. The count should be 0.
+    #[actix_rt::test]
+    async fn test_list_like_with_one_like_and_minus_one() {
+        use crate::schema::glossary;
+
+        let ctx = TestContext::new("test_list_like_with_one_like_and_minus_one");
+        let pool = ctx.get_pool();
+        let conn = pool.get().expect("could not get db connection from pool");
+
+        let glossary_id = Uuid::new_v4();
+
+        let item_1 = GlossaryDB {
+            id: glossary_id,
+            term: "test_term_1".to_string(),
+            revision: 1,
+            definition: "test_definition_1".to_string(),
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        };
+
+        // Insert two glossaries
+        diesel::insert_into(glossary::table)
+            .values(item_1)
+            .execute(&conn)
+            .expect("could not insert glossary");
+
+        let mut app = test::init_service(
+            App::new()
+                .data(pool)
+                .service(list)
+                .service(plus_one)
+                .service(minus_one),
+        )
+        .await;
+
+        // Create a like using api POST /glossary/{glossary_id}/likes
+        let req = test::TestRequest::post()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Get the list of likes using GET /glossary/{glossary_id}/likes
+        let req = test::TestRequest::get()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let mut resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Count should be 1 because there is one like
+        let body = resp.take_body().as_str().to_owned();
+        let response: Likes = serde_json::from_str(&body).unwrap();
+        assert_eq!(response.count, 1);
+
+        // Delete the like using api DELETE /glossary/{glossary_id}/likes
+        let req = test::TestRequest::delete()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Get the list of likes using GET /glossary/{glossary_id}/likes
+        let req = test::TestRequest::get()
+            .uri(&format!("/glossary/{}/likes", glossary_id))
+            .to_request();
+        let mut resp = test::call_service(&mut app, req).await;
+        assert_eq!(resp.status().is_success(), true);
+
+        // Count should be 0 because there is no like
+        let body = resp.take_body().as_str().to_owned();
+        let response: Likes = serde_json::from_str(&body).unwrap();
+        assert_eq!(response.count, 0);
     }
 }
