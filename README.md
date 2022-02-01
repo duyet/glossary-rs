@@ -70,6 +70,9 @@ Then open in your browser: http://localhost:8080
 
 ## Tests
 
+To run the unittest, make sure to have Postgres installed in your machine.
+Please export ```TEST_DATABASE_URL=postgres://localhost:5432``` to your Postgres instance.
+
 ```
 cargo test
 ```
