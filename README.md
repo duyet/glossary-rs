@@ -73,6 +73,14 @@ Then open in your browser: http://localhost:8080
 To run the unittest, make sure to have Postgres installed in your machine.
 Please export ```TEST_DATABASE_URL=postgres://localhost:5432``` to your Postgres instance.
 
+- On the MacOS, the easiest way is install https://postgres.app
+- Otherwise, you can start Postgres by Docker Compose:
+   ```
+   docker-compose up -d
+   ```
+
+To run the unittest:
+
 ```
 cargo test
 ```
