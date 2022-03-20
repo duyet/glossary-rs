@@ -1,4 +1,4 @@
-use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
+use actix_web::{delete, get, post, put, web, HttpRequest, Responder};
 use actix_web_validator::Json;
 use ammonia::clean;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -11,7 +11,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 use validator::Validate;
 
-use super::glossary_history::create_glossary_history;
+use super::glossary_history::{create_glossary_history, list_glossary_history};
 use super::like::{list_likes, Like};
 use crate::response::{ErrorResp, ListResp, Message};
 use crate::schema::*;
@@ -27,6 +27,7 @@ pub struct Glossary {
     pub revision: i32,
     pub likes: Vec<Like>,
     pub likes_count: i32,
+    pub who: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -40,6 +41,7 @@ impl Glossary {
             revision: 0,
             likes: vec![],
             likes_count: 0,
+            who: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -61,6 +63,13 @@ impl Glossary {
         Self {
             likes,
             likes_count,
+            ..self.clone()
+        }
+    }
+
+    pub fn add_who(&self, who: String) -> Self {
+        Self {
+            who: Some(who),
             ..self.clone()
         }
     }
@@ -86,9 +95,24 @@ impl GlossaryDB {
             revision: self.revision,
             likes: vec![],
             likes_count: 0,
+            who: None,
             created_at: DateTime::<Utc>::from_utc(self.created_at, Utc),
             updated_at: DateTime::<Utc>::from_utc(self.updated_at, Utc),
         }
+    }
+
+    pub fn to_glossary_with_who(&self, who: Option<String>) -> Glossary {
+        let mut glossary = self.to_glossary();
+        glossary.who = who;
+
+        glossary
+    }
+
+    pub fn to_glossary_with_who_from_db(&self, conn: &DBPooledConnection) -> Glossary {
+        let id = Uuid::from_str(&self.id.to_string()).unwrap();
+        let histories = list_glossary_history(conn, id).unwrap_or_default();
+        let who = histories.last().map(|h| h.who.clone()).unwrap_or_default();
+        self.to_glossary_with_who(who)
     }
 }
 
@@ -244,89 +268,36 @@ pub type GroupedGlossary = std::collections::HashMap<String, Vec<Glossary>>;
 
 /// List all glossaries
 #[get("/glossary")]
-pub async fn list(pool: web::Data<DBPool>) -> Result<HttpResponse, ErrorResp> {
+pub async fn list(pool: web::Data<DBPool>) -> actix_web::Result<impl Responder, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
     // Diesel does not support tokio (the asynchronous engine behind Actix),
     // so we have to run it in separate threads using the web::block
-    let glossaries = web::block(move || list_glossary(&conn)).await;
-
-    let conn = pool.get().expect("could not get db connection from pool");
+    let glossaries = web::block(move || list_glossary(&conn)).await?;
 
     match glossaries {
         Ok(glossaries) => {
             let mut glossaries_by_alphabet: HashMap<String, Vec<Glossary>> = HashMap::new();
+            let conn = pool.get().expect("could not get db connection from pool");
 
             glossaries.into_iter().for_each(|a| {
-                let likes = list_likes(&conn, Uuid::from_str(&a.id.to_string()).unwrap()).unwrap();
+                let id = Uuid::from_str(&a.id.to_string()).unwrap();
+                let likes = list_likes(&conn, id).unwrap_or_default();
+                let histories = list_glossary_history(&conn, id).unwrap_or_default();
+                let who = match histories.last() {
+                    Some(h) => h.who.clone().unwrap_or_default(),
+                    None => "".to_string(),
+                };
 
                 let character = a.term.chars().next().unwrap().to_uppercase();
                 let b = glossaries_by_alphabet
                     .entry(character.to_string())
                     .or_insert_with(Vec::new);
-                b.push(a.to_glossary().add_likes(likes));
+                b.push(a.to_glossary().add_likes(likes).add_who(who));
             });
 
-            Ok(HttpResponse::Ok().json(glossaries_by_alphabet as GroupedGlossary))
+            Ok(web::Json(glossaries_by_alphabet as GroupedGlossary))
         }
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
-}
-
-/// Find a glossary by id
-#[get("/glossary/{id}")]
-pub async fn get(
-    pool: web::Data<DBPool>,
-    web::Path(id): web::Path<String>,
-) -> Result<HttpResponse, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
-
-    match web::block(move || get_glossary(&conn, Uuid::from_str(id.as_str()).unwrap())).await {
-        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
-}
-
-/// Update a glossary by id
-#[put("/glossary/{id}")]
-pub async fn update(
-    pool: web::Data<DBPool>,
-    web::Path(id): web::Path<String>,
-    Json(value): Json<GlossaryRequest>,
-    req: HttpRequest,
-) -> Result<HttpResponse, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
-
-    let who = req
-        .headers()
-        .get(crate::AUTHENTICATED_USER_HEADER)
-        .map(|email| email.to_str().unwrap().to_string());
-
-    match web::block(move || {
-        update_glossary(
-            &conn,
-            Uuid::from_str(id.as_str()).unwrap(),
-            value.to_glossary().unwrap(),
-            who,
-        )
-    })
-    .await
-    {
-        Ok(g) => Ok(HttpResponse::Ok().json(g.to_glossary())),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
-}
-
-/// Delete a glossary by id
-#[delete("/glossary/{id}")]
-pub async fn delete(
-    pool: web::Data<DBPool>,
-    web::Path(id): web::Path<String>,
-) -> Result<HttpResponse, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
-
-    match web::block(move || delete_glossary(&conn, Uuid::from_str(id.as_str()).unwrap())).await {
-        Ok(_) => Ok(HttpResponse::Ok().json(Message::new("deleted"))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -337,16 +308,76 @@ pub async fn create(
     json: Json<GlossaryRequest>,
     req: HttpRequest,
     pool: web::Data<DBPool>,
-) -> Result<HttpResponse, ErrorResp> {
+) -> actix_web::Result<impl Responder, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
     let who = req
         .headers()
         .get(crate::AUTHENTICATED_USER_HEADER)
         .map(|email| email.to_str().unwrap().to_string());
+    let who_ = who.clone();
 
-    match web::block(move || create_glossary(&conn, json, who)).await {
-        Ok(result) => Ok(HttpResponse::Ok().json(result.to_glossary())),
+    match web::block(move || create_glossary(&conn, json, who)).await? {
+        Ok(result) => Ok(web::Json(result.to_glossary_with_who(who_))),
+        Err(e) => Err(ErrorResp::new(&e.to_string())),
+    }
+}
+
+/// Find a glossary by id
+#[get("/glossary/{id}")]
+pub async fn get(
+    pool: web::Data<DBPool>,
+    id: web::Path<String>,
+) -> actix_web::Result<impl Responder, ErrorResp> {
+    let conn = pool.get().expect("could not get db connection from pool");
+    let conn2 = pool.get().expect("could not get db connection from pool");
+
+    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
+
+    match web::block(move || get_glossary(&conn, glossary_id)).await? {
+        Ok(g) => Ok(web::Json(g.to_glossary_with_who_from_db(&conn2))),
+        Err(e) => Err(ErrorResp::new(&e.to_string())),
+    }
+}
+
+/// Update a glossary by id
+#[put("/glossary/{id}")]
+pub async fn update(
+    pool: web::Data<DBPool>,
+    id: web::Path<String>,
+    Json(value): Json<GlossaryRequest>,
+    req: HttpRequest,
+) -> actix_web::Result<impl Responder, ErrorResp> {
+    let who = req
+        .headers()
+        .get(crate::AUTHENTICATED_USER_HEADER)
+        .map(|email| email.to_str().unwrap().to_string());
+    let who2 = who.clone();
+
+    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
+
+    match web::block(move || {
+        let conn = pool.get().expect("could not get db connection from pool");
+        update_glossary(&conn, glossary_id, value.to_glossary().unwrap(), who)
+    })
+    .await?
+    {
+        Ok(g) => Ok(web::Json(g.to_glossary_with_who(who2))),
+        Err(e) => Err(ErrorResp::new(&e.to_string())),
+    }
+}
+
+/// Delete a glossary by id
+#[delete("/glossary/{id}")]
+pub async fn delete(
+    pool: web::Data<DBPool>,
+    id: web::Path<String>,
+) -> actix_web::Result<impl Responder, ErrorResp> {
+    let conn = pool.get().expect("could not get db connection from pool");
+    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
+
+    match web::block(move || delete_glossary(&conn, glossary_id)).await? {
+        Ok(_) => Ok(web::Json(Message::new("deleted"))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -361,17 +392,17 @@ pub struct PopularQuery {
 pub async fn list_popular(
     pool: web::Data<DBPool>,
     query: web::Query<PopularQuery>,
-) -> Result<HttpResponse, ErrorResp> {
+) -> actix_web::Result<impl Responder, ErrorResp> {
     let conn = pool.get().expect("could not get db connection from pool");
 
     let glossaries = web::block(move || {
         let limit = query.limit;
         list_popular_glossary(&conn, limit)
     })
-    .await;
+    .await?;
 
     match glossaries {
-        Ok(glossaries) => Ok(HttpResponse::Ok().json(glossaries)),
+        Ok(glossaries) => Ok(web::Json(glossaries)),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -380,16 +411,32 @@ pub async fn list_popular(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{BodyTest, TestContext};
+    use crate::test_utils::TestContext;
     use crate::v1::like::create_like;
-    use actix_web::{test, App};
+    use actix_web::{http::StatusCode, test, App};
+
+    macro_rules! service_should_ok_and_return_json {
+        ($app:expr, $req:expr) => {{
+            let req = test::TestRequest::from($req).to_request();
+            let resp = test::call_service(&$app, req).await;
+            println!("{:?}", resp);
+
+            assert!(resp.status().is_success());
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "application/json"
+            );
+
+            resp
+        }};
+    }
 
     // Insert a glossary into database.
     // Than, using API to get list of glossaries
     #[actix_rt::test]
     async fn test_list_glossary() {
         let ctx = TestContext::new("test_list_glossary");
-        let pool = ctx.get_pool();
+        let pool = web::Data::new(ctx.get_pool());
         let conn = pool.get().expect("could not get db connection from pool");
 
         let item_1 = GlossaryDB {
@@ -419,18 +466,11 @@ mod tests {
             .execute(&conn)
             .expect("could not insert glossary");
 
-        let mut app = test::init_service(App::new().data(pool).service(list)).await;
-        let req = test::TestRequest::get().uri("/glossary").to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+        let app = test::init_service(App::new().app_data(pool).service(list)).await;
 
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+        // Response should be OK and application/json
+        let req = test::TestRequest::get().uri("/glossary");
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // The response should be:
         // {
@@ -439,9 +479,7 @@ mod tests {
         //      { "term": "test_term_2", "definition": "test_definition_2", ... },
         //   ]
         // }
-        let body = resp.take_body().as_str().to_owned();
-        println!("{}", body);
-        let response: GroupedGlossary = serde_json::from_str(&body).unwrap();
+        let response: GroupedGlossary = test::read_body_json(resp).await;
         assert_eq!(response.keys().len(), 1);
         let values = response.get("T").unwrap();
         assert_eq!(values.len(), 2);
@@ -452,14 +490,14 @@ mod tests {
     #[actix_rt::test]
     async fn test_get_glossary() {
         let ctx = TestContext::new("test_get_glossary");
-        let pool = ctx.get_pool();
+        let pool = web::Data::new(ctx.get_pool());
         let conn = pool.get().expect("could not get db connection from pool");
 
-        let item_id = Uuid::new_v4();
-        let api_url = format!("/glossary/{}", item_id);
+        let glossary_id = Uuid::new_v4();
+        let api_url = format!("/glossary/{}", glossary_id);
 
-        let item_1 = GlossaryDB {
-            id: item_id,
+        let item = GlossaryDB {
+            id: glossary_id,
             term: "test_term_1".to_string(),
             revision: 1,
             definition: "test_definition_1".to_string(),
@@ -469,129 +507,153 @@ mod tests {
 
         // Insert two glossaries
         diesel::insert_into(glossary::table)
-            .values(item_1)
+            .values(item)
             .execute(&conn)
             .expect("could not insert glossary");
 
-        let mut app = test::init_service(App::new().data(pool).service(get)).await;
-        let req = test::TestRequest::get().uri(&api_url).to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+        let app = test::init_service(App::new().app_data(pool).service(get)).await;
 
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+        // Response should be OK and application/json
+        let req = test::TestRequest::get().uri(&api_url);
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Body JSON should contains the term and definition
-        let body = resp.take_body().as_str().to_owned();
-        let response: Glossary = serde_json::from_str(&body).unwrap();
-        assert_eq!(response.term, "test_term_1");
-        assert_eq!(response.definition, "test_definition_1");
-        assert_eq!(response.revision, 1);
+        let resp: Glossary = test::read_body_json(resp).await;
+        assert_eq!(resp.term, "test_term_1");
+        assert_eq!(resp.definition, "test_definition_1");
+        assert_eq!(resp.revision, 1);
+    }
+
+    // Get glossasy that not exists
+    // TODO: should return 404 NOT FOUND
+    #[actix_rt::test]
+    async fn test_get_glossary_not_exists() {
+        let ctx = TestContext::new("test_get_glossary_not_exists");
+        let pool = web::Data::new(ctx.get_pool());
+
+        let non_exists_id = Uuid::new_v4();
+        let api_url = format!("/glossary/{}", non_exists_id);
+
+        // Init app
+        let app = test::init_service(App::new().app_data(pool).service(get)).await;
+
+        // Response should be not found
+        let req = test::TestRequest::get().uri(&api_url).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // Get glossasy with invalid id
+    #[actix_rt::test]
+    async fn test_get_glossary_invalid_id() {
+        let ctx = TestContext::new("test_get_glossary_invalid_id");
+        let pool = web::Data::new(ctx.get_pool());
+
+        let invalid_glossary_id = "abc1234";
+        let api_url = format!("/glossary/{}", invalid_glossary_id);
+
+        // Init app
+        let app = test::init_service(App::new().app_data(pool).service(get)).await;
+
+        // Response should be not found
+        let req = test::TestRequest::get().uri(&api_url).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     // Using API to create glossary
     #[actix_rt::test]
     async fn test_create_glossary() {
         let ctx = TestContext::new("test_create_glossary");
-        let pool = ctx.get_pool();
+        let pool = web::Data::new(ctx.get_pool());
 
-        let mut app = test::init_service(App::new().data(pool).service(create)).await;
+        let app = test::init_service(App::new().app_data(pool).service(create)).await;
+        let glossary_req = GlossaryRequest {
+            term: Some("test_term_1".to_string()),
+            definition: Some("test_definition_1".to_string()),
+        };
+
+        // Response should be OK and application/json
         let req = test::TestRequest::post()
             .uri("/glossary")
-            .set_json(&GlossaryRequest {
-                term: Some("test_term_1".to_string()),
-                definition: Some("test_definition_1".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+            .set_json(&glossary_req);
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Body JSON should contains the term and definition
-        let body = resp.take_body().as_str().to_owned();
-        let response: Glossary = serde_json::from_str(&body).unwrap();
-        assert_eq!(response.term, "test_term_1");
-        assert_eq!(response.definition, "test_definition_1");
+        let resp: Glossary = test::read_body_json(resp).await;
+        assert_eq!(resp.term, "test_term_1");
+        assert_eq!(resp.definition, "test_definition_1");
+    }
+
+    // Using API to create glossary with invalid JSON
+    #[actix_rt::test]
+    async fn test_create_glossary_invalid_json() {
+        let ctx = TestContext::new("test_create_glossary_invalid_json");
+        let pool = web::Data::new(ctx.get_pool());
+
+        let app = test::init_service(App::new().app_data(pool).service(create)).await;
+        let glossary_req = b"{\"invalid\": \"json\"}";
+
+        let req = test::TestRequest::post()
+            .uri("/glossary")
+            .set_json(&glossary_req)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        // Response should be bad request
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     // Using API to create glossary. Than, using API to get glossary.
     #[actix_rt::test]
-    async fn test_create_than_get_glossary() {
-        let ctx = TestContext::new("test_create_than_get_glossary");
-        let pool = ctx.get_pool();
+    async fn test_create_glossary_then_get() {
+        let ctx = TestContext::new("test_create_glossary_then_get");
+        let pool = web::Data::new(ctx.get_pool());
 
-        let mut app = test::init_service(App::new().data(pool).service(create).service(get)).await;
+        let app = test::init_service(App::new().app_data(pool).service(create).service(get)).await;
         let req = test::TestRequest::post()
             .uri("/glossary")
             .set_json(&GlossaryRequest {
                 term: Some("test_term_1".to_string()),
                 definition: Some("test_definition_1".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+            });
 
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_create: Glossary = serde_json::from_str(&body).unwrap();
+        // Response should be OK and application/json
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Get glossary from api
-        let req = test::TestRequest::get()
-            .uri(&format!("/glossary/{}", response_of_create.id))
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+        let response_of_create: Glossary = test::read_body_json(resp).await;
 
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
-
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_get: Glossary = serde_json::from_str(&body).unwrap();
+        // Response should be OK and application/json
+        let req = test::TestRequest::get().uri(&format!("/glossary/{}", response_of_create.id));
+        let resp = service_should_ok_and_return_json!(app, req);
+        let response_of_get: Glossary = test::read_body_json(resp).await;
 
         // Response of API create should be equal to response of API get
-        assert_eq!(response_of_get, response_of_create);
+        assert_eq!(response_of_create, response_of_get);
     }
 
     // Using API to create glossary. Than, using API to update glossary.
     #[actix_rt::test]
-    async fn test_create_than_update_glossary() {
-        let ctx = TestContext::new("test_create_than_update_glossary");
-        let pool = ctx.get_pool();
+    async fn test_create_glossary_then_update() {
+        let ctx = TestContext::new("test_create_glossary_then_update");
+        let pool = web::Data::new(ctx.get_pool());
 
-        let mut app =
-            test::init_service(App::new().data(pool).service(create).service(update)).await;
+        let services = App::new().app_data(pool).service(create).service(update);
+        let app = test::init_service(services).await;
+
+        // Response should be OK and application/json
         let req = test::TestRequest::post()
             .uri("/glossary")
             .set_json(&GlossaryRequest {
                 term: Some("test_term_1".to_string()),
                 definition: Some("test_definition_1".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+            });
+        let resp = service_should_ok_and_return_json!(app, req);
 
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_create: Glossary = serde_json::from_str(&body).unwrap();
+        let response_of_create: Glossary = test::read_body_json(resp).await;
 
         // Verify that insert correctly
         assert_eq!(response_of_create.term, "test_term_1");
@@ -604,22 +666,11 @@ mod tests {
             .set_json(&GlossaryRequest {
                 term: Some("test_term_1_updated".to_string()),
                 definition: Some("test_definition_1_updated".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+            });
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Body JSON should contains the term and definition
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_update: Glossary = serde_json::from_str(&body).unwrap();
+        let response_of_update: Glossary = test::read_body_json(resp).await;
         assert_eq!(response_of_update.term, "test_term_1_updated");
         assert_eq!(response_of_update.definition, "test_definition_1_updated");
         assert_eq!(response_of_update.revision, 1);
@@ -627,68 +678,49 @@ mod tests {
 
     // Using API to create glossary. Than, using API to delete glossary.
     #[actix_rt::test]
-    async fn test_create_than_delete_glossary() {
-        let ctx = TestContext::new("test_create_than_delete_glossary");
-        let pool = ctx.get_pool();
+    async fn test_create_glossary_then_delete() {
+        let ctx = TestContext::new("test_create_glossary_then_delete");
+        let pool = web::Data::new(ctx.get_pool());
 
-        let mut app = test::init_service(
+        let app = test::init_service(
             App::new()
-                .data(pool)
+                .app_data(pool)
                 .service(create)
                 .service(get)
                 .service(delete),
         )
         .await;
+
         let req = test::TestRequest::post()
             .uri("/glossary")
             .set_json(&GlossaryRequest {
                 term: Some("test_term_1".to_string()),
                 definition: Some("test_definition_1".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+            });
 
-        // Response should be OK
-        assert!(resp.status().is_success());
+        // Response should be OK and application/json
+        let resp = service_should_ok_and_return_json!(app, req);
 
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_create: Glossary = serde_json::from_str(&body).unwrap();
+        // Response of create
+        let response_of_create: Glossary = test::read_body_json(resp).await;
 
         // Verify that insert correctly
         assert_eq!(response_of_create.term, "test_term_1");
         assert_eq!(response_of_create.definition, "test_definition_1");
         assert_eq!(response_of_create.revision, 0);
 
-        // Delete glossary
-        let req = test::TestRequest::delete()
-            .uri(&format!("/glossary/{}", response_of_create.id))
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-
-        // Using to debug if the delete is not working
-        let body = resp.take_body().as_str().to_owned();
-        println!("{}", body);
-
-        // Response should be OK
-        assert!(resp.status().is_success());
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+        // Delete glossary should success
+        let req = test::TestRequest::delete().uri(&format!("/glossary/{}", response_of_create.id));
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Response should be: {"message": "deleted"}
-        let response_of_delete: Message = serde_json::from_str(&body).unwrap();
+        let response_of_delete: Message = test::read_body_json(resp).await;
         assert_eq!(response_of_delete.message, "deleted");
 
         // For sure, we get the deleted glossary via API again
-        let req = test::TestRequest::get()
-            .uri(&format!("/glossary/{}", response_of_create.id))
-            .to_request();
-        let resp = test::call_service(&mut app, req).await;
-
+        let req = test::TestRequest::get().uri(&format!("/glossary/{}", response_of_create.id));
+        let resp = test::call_service(&app, req.to_request()).await;
         println!("{:?}", resp.status());
-
         // Response should be NOT_FOUND
         assert!(resp.status().is_client_error());
     }
@@ -698,25 +730,16 @@ mod tests {
     #[actix_rt::test]
     async fn test_list_popular_glossaries_empty() {
         let ctx = TestContext::new("test_list_popular_glossaries");
-        let pool = ctx.get_pool();
+        let pool = web::Data::new(ctx.get_pool());
 
-        let mut app = test::init_service(App::new().data(pool).service(list_popular)).await;
-        let req = test::TestRequest::get()
-            .uri("/glossary-popular")
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
+        let app = test::init_service(App::new().app_data(pool).service(list_popular)).await;
 
-        // Response should be OK
-        assert!(resp.status().is_success());
+        // Response should be OK and application/json
+        let req = test::TestRequest::get().uri("/glossary-popular");
+        let resp = service_should_ok_and_return_json!(app, req);
 
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
-
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_list_popular: Vec<Glossary> = serde_json::from_str(&body).unwrap();
+        // Response
+        let response_of_list_popular: Vec<Glossary> = test::read_body_json(resp).await;
 
         // By default: the list popular should be empty if there is not likes on any glossary
         assert!(response_of_list_popular.is_empty());
@@ -726,26 +749,28 @@ mod tests {
     #[actix_rt::test]
     async fn test_list_popular_glossaries_with_inserted_glossaries() {
         let ctx = TestContext::new("test_list_popular_glossaries_with_inserted_glossaries");
-        let pool = ctx.get_pool();
+        let pool = web::Data::new(ctx.get_pool());
         let conn = pool.get().unwrap();
 
-        let mut app =
-            test::init_service(App::new().data(pool).service(create).service(list_popular)).await;
+        let app = test::init_service(
+            App::new()
+                .app_data(pool)
+                .service(create)
+                .service(list_popular),
+        )
+        .await;
+
+        // Response should be OK and application/json
         let req = test::TestRequest::post()
             .uri("/glossary")
             .set_json(&GlossaryRequest {
                 term: Some("test_term_1".to_string()),
                 definition: Some("test_definition_1".to_string()),
-            })
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-
-        // Response should be OK
-        assert!(resp.status().is_success());
+            });
+        let resp = service_should_ok_and_return_json!(app, req);
 
         // Verify that insert correctly
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_create: Glossary = serde_json::from_str(&body).unwrap();
+        let response_of_create: Glossary = test::read_body_json(resp).await;
         assert_eq!(response_of_create.term, "test_term_1");
         assert_eq!(response_of_create.definition, "test_definition_1");
         assert_eq!(response_of_create.revision, 0);
@@ -754,22 +779,9 @@ mod tests {
         let _ = create_like(&conn, glossary_id, None);
 
         // Get the list popular
-        let req = test::TestRequest::get()
-            .uri("/glossary-popular")
-            .to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-
-        // Response should be OK
-        assert!(resp.status().is_success());
-
-        // Response should be application/json
-        assert_eq!(
-            resp.headers().get("content-type").unwrap(),
-            "application/json"
-        );
-
-        let body = resp.take_body().as_str().to_owned();
-        let response_of_list_popular: Vec<Glossary> = serde_json::from_str(&body).unwrap();
+        let req = test::TestRequest::get().uri("/glossary-popular");
+        let resp = service_should_ok_and_return_json!(app, req);
+        let response_of_list_popular: Vec<Glossary> = test::read_body_json(resp).await;
         assert_eq!(response_of_list_popular.len(), 1);
     }
 }
