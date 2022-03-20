@@ -20,6 +20,8 @@ jobs:
             archive: zip
     steps:
       - uses: actions/checkout@master
+      - name: Install PG
+        run: sudo apt-get install libpq-dev -y
       - name: Compile and release
         uses: rust-build/rust-build.action@latest
         env:
