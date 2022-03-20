@@ -1,10 +1,16 @@
 name: Build & Test
 
 on:
+  schedule:
+    - cron: "0 10 * * *"
   push:
-    branches: [master]
+    branches:
+      - master
+    tags:
+      - "v*.*.*"
   pull_request:
-    branches: [master]
+    branches:
+      - master
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,6 +53,23 @@ jobs:
       - name: Rust tests
         run: TEST_DATABASE_URL=postgres://postgres:postgres@localhost cargo test --verbose
 
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            ghcr.io/duyet/glossary
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
@@ -65,9 +88,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/duyet/glossary:latest
-            ghcr.io/duyet/glossary:0.1.0
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
