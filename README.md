@@ -5,6 +5,17 @@
     Open-Source Glossary API Service written in Rust, 
     powered by https://actix.rs and https://diesel.rs.
   </p>
+  <p>
+    <a href="https://github.com/duyet/glossary-rs/actions/workflows/build-test.yaml">
+      <img src="https://github.com/duyet/glossary-rs/actions/workflows/build-test.yaml/badge.svg" />
+    </a>
+    <a href="https://github.com/duyet/glossary-rs/graphs/contributors" alt="Contributors">
+      <img src="https://img.shields.io/github/contributors/duyet/glossary-rs" />
+    </a>
+    <a href="https://github.com/duyet/glossary-rs/pulse" alt="Activity">
+      <img src="https://img.shields.io/github/commit-activity/m/duyet/glossary-rs" />
+    </a>
+  </p>
 </div>
 
 # Endpoints
