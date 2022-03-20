@@ -50,12 +50,23 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          target: ${{ matrix.target }}
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v1
 
       - name: Rust Test
-        run: TEST_DATABASE_URL=postgres://postgres:postgres@localhost cargo test --verbose --release --tarrget ${{ matrix.target }}
+        run: |
+          sudo apt-get install -y gcc-mingw-w64 mingw-w64 llvm-dev libclang-dev clang libxml2-dev libz-dev
+          cat > /home/runner/.cargo/config.toml << EOF
+          [target.x86_64-unknown-linux-musl]
+          linker = "x86_64-linux-musl-gcc"
+          [target.x86_64-apple-darwin]
+          linker = "x86_64-apple-darwin14-clang"
+          ar = "x86_64-apple-darwin14-ar"
+          EOF
+          export TEST_DATABASE_URL=postgres://postgres:postgres@localhost 
+          cargo test --verbose --release --target ${{ matrix.target }}
 
   build:
     name: build and push docker
