@@ -56,15 +56,17 @@ async fn main() -> std::io::Result<()> {
             .allow_any_method();
 
         App::new()
-            .data(pool.clone())
-            .app_data(web::JsonConfig::default().error_handler(response::json_error_handler))
+            .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(
+                web::JsonConfig::default().error_handler(response::json_error_handler),
+            ))
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
             .wrap(cors)
             .service(index)
             .service(ping)
             .service(
-                web::scope("/api/v1/")
+                web::scope("/api/v1")
                     .service(v1::glossary::list)
                     .service(v1::glossary::list_popular)
                     .service(v1::glossary::get)
@@ -80,6 +82,10 @@ async fn main() -> std::io::Result<()> {
     .run();
 
     info!("Server running at http://{}", listen);
+    info!(
+        "Capture the {} header as the author.",
+        glossary::AUTHENTICATED_USER_HEADER
+    );
 
     server.await
 }
@@ -87,42 +93,24 @@ async fn main() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::body::{Body, ResponseBody};
-    use actix_web::test;
-
-    trait BodyTest {
-        fn as_str(&self) -> &str;
-    }
-
-    impl BodyTest for ResponseBody<Body> {
-        fn as_str(&self) -> &str {
-            match self {
-                ResponseBody::Body(ref b) => match b {
-                    Body::Bytes(ref by) => std::str::from_utf8(by).unwrap(),
-                    _ => panic!(),
-                },
-                ResponseBody::Other(ref b) => match b {
-                    Body::Bytes(ref by) => std::str::from_utf8(by).unwrap(),
-                    _ => panic!(),
-                },
-            }
-        }
-    }
+    use actix_web::{http::header, test, web::Bytes};
 
     #[actix_rt::test]
     async fn test_index_get() {
-        let mut app = test::init_service(App::new().service(index)).await;
-        let req = test::TestRequest::with_header("content-type", "text/plain").to_request();
-        let resp = test::call_service(&mut app, req).await;
+        let app = test::init_service(App::new().service(index)).await;
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(header::ContentType::json())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
     }
 
     #[actix_rt::test]
     async fn test_ping() {
-        let mut app = test::init_service(App::new().service(ping)).await;
+        let app = test::init_service(App::new().service(ping)).await;
         let req = test::TestRequest::get().uri("/ping").to_request();
-        let mut resp = test::call_service(&mut app, req).await;
-        assert!(resp.status().is_success());
-        assert_eq!(resp.take_body().as_str(), "pong");
+        let resp = test::call_and_read_body(&app, req).await;
+        assert_eq!(resp, Bytes::from_static(b"pong"));
     }
 }

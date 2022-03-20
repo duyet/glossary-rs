@@ -1,4 +1,4 @@
-use actix_web::error::ResponseError;
+use actix_web::error::{ResponseError, BlockingError};
 use actix_web::{error, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -88,6 +88,14 @@ impl ResponseError for ErrorResp {
         };
 
         actix_web::HttpResponse::build(status_code).json(json_response)
+    }
+}
+
+impl std::convert::From<BlockingError> for ErrorResp {
+    fn from(error: BlockingError) -> Self {
+        Self {
+            error: error.to_string(),
+        }
     }
 }
 

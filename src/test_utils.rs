@@ -18,12 +18,10 @@ embed_migrations!("migrations/");
 
 impl TestContext {
     pub fn new(db_name: &str) -> Self {
-        let base_url =
-            env::var("TEST_DATABASE_URL").unwrap_or_else(|_| "postgres://localhost".to_string());
-        println!(
-            "Creating test database {} in {}, please set TEST_DATABASE_URL to change this",
-            db_name, base_url
-        );
+        let default = |_| "postgres://localhost".to_string();
+        let base_url = env::var("TEST_DATABASE_URL").unwrap_or_else(default);
+        println!("Creating test database `{}` in `{}` ...", db_name, base_url);
+        println!("Note: please set `TEST_DATABASE_URL` to change this behavior.\n");
 
         let database_url = format!("{}/postgres", base_url);
         let conn = PgConnection::establish(&database_url).expect("Could not connect to database");
@@ -80,27 +78,5 @@ impl Drop for TestContext {
         sql_query(format!("DROP DATABASE {}", self.db_name).as_str())
             .execute(&self.conn)
             .unwrap_or_else(|_| panic!("Couldn't drop database {}", self.db_name));
-    }
-}
-
-pub use actix_web::body::{Body, ResponseBody};
-
-pub trait BodyTest {
-    fn as_str(&self) -> &str;
-}
-
-/// Get the body from ResponseBody::Body
-impl BodyTest for ResponseBody<Body> {
-    fn as_str(&self) -> &str {
-        match self {
-            ResponseBody::Body(ref b) => match b {
-                Body::Bytes(ref by) => std::str::from_utf8(by).unwrap(),
-                _ => panic!(),
-            },
-            ResponseBody::Other(ref b) => match b {
-                Body::Bytes(ref by) => std::str::from_utf8(by).unwrap(),
-                _ => panic!(),
-            },
-        }
     }
 }
