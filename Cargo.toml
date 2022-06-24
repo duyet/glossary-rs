@@ -6,7 +6,7 @@ authors = ["Duyet <me@duyet.net>"]
 
 [dependencies]
 actix-cors = "0.6.1"
-actix-web = "4.0.1"
+actix-web = "4.1.0"
 actix-web-validator = "3.0.0"
 ammonia = "3"
 anyhow = "1.0.58"
