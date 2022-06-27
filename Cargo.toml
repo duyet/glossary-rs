@@ -19,7 +19,7 @@ log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.81"
 thiserror = "1.0.31"
-uuid = { version = "0.6", features = ["serde", "v4"] }
+uuid = { version = "1.1", features = ["serde", "v4"] }
 validator = { version = "0.14", features = ["derive"] }
 
 [dev-dependencies]
