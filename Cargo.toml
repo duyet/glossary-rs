@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Duyet <me@duyet.net>"]
 
 [dependencies]
-actix-cors = "0.6.1"
+actix-cors = "0.6.2"
 actix-web = "4.1.0"
 actix-web-validator = "4.0.0"
 ammonia = "3"
