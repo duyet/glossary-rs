@@ -1,15 +1,14 @@
 use chrono::{NaiveDateTime, Utc};
-use diesel::result::Error;
-use diesel::{ExpressionMethods, QueryDsl, RunQueryDsl};
-use diesel::{Insertable, Queryable};
+use diesel::{
+    result::Error, ExpressionMethods, Insertable, PgConnection, QueryDsl, Queryable, RunQueryDsl,
+};
 use log::info;
 use uuid::Uuid;
 
 use crate::schema::*;
-use crate::DBPooledConnection;
 
 #[derive(Debug, Queryable, Insertable)]
-#[table_name = "glossary_history"]
+#[diesel(table_name = glossary_history)]
 pub struct GlossaryHistoryDB {
     pub id: Uuid,
     pub term: String,
@@ -21,7 +20,7 @@ pub struct GlossaryHistoryDB {
 }
 
 pub fn create_glossary_history(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     term: String,
     definition: String,
     who: Option<String>,
@@ -45,7 +44,7 @@ pub fn create_glossary_history(
 }
 
 pub fn list_glossary_history(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     _glossary_id: Uuid,
 ) -> Result<Vec<GlossaryHistoryDB>, Error> {
     use crate::schema::glossary_history::dsl::*;

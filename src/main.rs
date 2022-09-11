@@ -1,18 +1,15 @@
-#[macro_use]
-extern crate diesel_migrations;
-
 use actix_cors::Cors;
-use actix_web::{get, web, HttpResponse, Responder};
-use actix_web::{middleware, App, HttpServer};
-use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
-use diesel_migrations::embed_migrations;
+use actix_web::{get, middleware, web, App, HttpResponse, HttpServer, Responder};
+use diesel::{
+    pg::PgConnection,
+    r2d2::{ConnectionManager, Pool},
+};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use dotenv::dotenv;
 use log::info;
 use std::env;
 
-use glossary::response;
-use glossary::v1;
+use glossary::{response, v1};
 
 #[get("/")]
 pub async fn index() -> impl Responder {
@@ -25,7 +22,7 @@ pub async fn ping() -> impl Responder {
 }
 
 // Embed the migration into the binary
-embed_migrations!("./migrations");
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -46,8 +43,8 @@ async fn main() -> std::io::Result<()> {
         .expect("Failed to create connection pool");
 
     // Start migration if needed
-    let conn = pool.get().expect("could not get db connection from pool");
-    embedded_migrations::run_with_output(&conn, &mut std::io::stdout()).unwrap();
+    let conn = &mut pool.get().expect("could not get db connection from pool");
+    conn.run_pending_migrations(MIGRATIONS).expect("failed to migration");
 
     let server = HttpServer::new(move || {
         let cors = Cors::default()

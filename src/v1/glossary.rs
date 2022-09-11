@@ -2,20 +2,24 @@ use actix_web::{delete, get, post, put, web, HttpRequest, Responder};
 use actix_web_validator::Json;
 use ammonia::clean;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use diesel::result::Error;
-use diesel::{ExpressionMethods, GroupByDsl, QueryDsl, RunQueryDsl};
-use diesel::{Insertable, Queryable};
+use diesel::{
+    pg::PgConnection, result::Error, ExpressionMethods, Insertable, QueryDsl, Queryable,
+    RunQueryDsl,
+};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 use validator::Validate;
 
-use super::glossary_history::{create_glossary_history, list_glossary_history};
-use super::like::{list_likes, Like};
-use crate::response::{ErrorResp, ListResp, Message};
-use crate::schema::*;
-use crate::{DBPool, DBPooledConnection};
+use super::{
+    glossary_history::{create_glossary_history, list_glossary_history},
+    like::{list_likes, Like},
+};
+use crate::{
+    response::{ErrorResp, ListResp, Message},
+    schema::*,
+    DBPool,
+};
 
 pub type Glossaries = ListResp<Glossary>;
 
@@ -76,7 +80,7 @@ impl Glossary {
 }
 
 #[derive(Queryable, Insertable)]
-#[table_name = "glossary"]
+#[diesel(table_name = glossary)]
 pub struct GlossaryDB {
     pub id: Uuid,
     pub term: String,
@@ -108,7 +112,7 @@ impl GlossaryDB {
         glossary
     }
 
-    pub fn to_glossary_with_who_from_db(&self, conn: &DBPooledConnection) -> Glossary {
+    pub fn to_glossary_with_who_from_db(&self, conn: &mut PgConnection) -> Glossary {
         let id = Uuid::from_str(&self.id.to_string()).unwrap();
         let histories = list_glossary_history(conn, id).unwrap_or_default();
         let who = histories.last().map(|h| h.who.clone()).unwrap_or_default();
@@ -147,14 +151,14 @@ impl GlossaryRequest {
     }
 }
 
-fn list_glossary(conn: &DBPooledConnection) -> Result<Vec<GlossaryDB>, Error> {
+fn list_glossary(conn: &mut PgConnection) -> Result<Vec<GlossaryDB>, Error> {
     use crate::schema::glossary::dsl::*;
 
     glossary.order(term.asc()).load(conn)
 }
 
 fn create_glossary(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     value: Json<GlossaryRequest>,
     who: Option<String>,
 ) -> Result<GlossaryDB, Error> {
@@ -179,14 +183,14 @@ fn create_glossary(
     Ok(created)
 }
 
-fn get_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<GlossaryDB, Error> {
+fn get_glossary(conn: &mut PgConnection, _id: Uuid) -> Result<GlossaryDB, Error> {
     use crate::schema::glossary::dsl::*;
 
     glossary.filter(id.eq(_id)).first::<GlossaryDB>(conn)
 }
 
 fn update_glossary(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     _id: Uuid,
     value: Glossary,
     who: Option<String>,
@@ -215,7 +219,7 @@ fn update_glossary(
     Ok(updated)
 }
 
-fn delete_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<usize, Error> {
+fn delete_glossary(conn: &mut PgConnection, _id: Uuid) -> Result<usize, Error> {
     use crate::schema::glossary::dsl::*;
 
     // Need to delete foreign table first: glossary_history
@@ -236,11 +240,10 @@ fn delete_glossary(conn: &DBPooledConnection, _id: Uuid) -> Result<usize, Error>
 }
 
 fn list_popular_glossary(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     limit: Option<u8>,
 ) -> Result<Vec<Glossary>, Error> {
     use diesel::dsl;
-    use diesel::pg::expression::dsl::any;
 
     let limit = limit.unwrap_or(10);
 
@@ -254,7 +257,7 @@ fn list_popular_glossary(
 
     // Get glossaries in the list
     let glossaries = glossary::table
-        .filter(glossary::columns::id.eq(any(most_glossary_id_by_count)))
+        .filter(glossary::columns::id.eq_any(most_glossary_id_by_count))
         .load::<GlossaryDB>(conn)
         .unwrap()
         .into_iter()
@@ -269,21 +272,21 @@ pub type GroupedGlossary = std::collections::HashMap<String, Vec<Glossary>>;
 /// List all glossaries
 #[get("/glossary")]
 pub async fn list(pool: web::Data<DBPool>) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     // Diesel does not support tokio (the asynchronous engine behind Actix),
     // so we have to run it in separate threads using the web::block
-    let glossaries = web::block(move || list_glossary(&conn)).await?;
+    let glossaries = web::block(move || list_glossary(&mut conn)).await?;
 
     match glossaries {
         Ok(glossaries) => {
             let mut glossaries_by_alphabet: HashMap<String, Vec<Glossary>> = HashMap::new();
-            let conn = pool.get().expect("could not get db connection from pool");
+            let mut conn = pool.get().expect("could not get db connection from pool");
 
             glossaries.into_iter().for_each(|a| {
                 let id = Uuid::from_str(&a.id.to_string()).unwrap();
-                let likes = list_likes(&conn, id).unwrap_or_default();
-                let histories = list_glossary_history(&conn, id).unwrap_or_default();
+                let likes = list_likes(&mut conn, id).unwrap_or_default();
+                let histories = list_glossary_history(&mut conn, id).unwrap_or_default();
                 let who = match histories.last() {
                     Some(h) => h.who.clone().unwrap_or_default(),
                     None => "".to_string(),
@@ -309,7 +312,7 @@ pub async fn create(
     req: HttpRequest,
     pool: web::Data<DBPool>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     let who = req
         .headers()
@@ -317,7 +320,7 @@ pub async fn create(
         .map(|email| email.to_str().unwrap().to_string());
     let who_ = who.clone();
 
-    match web::block(move || create_glossary(&conn, json, who)).await? {
+    match web::block(move || create_glossary(&mut conn, json, who)).await? {
         Ok(result) => Ok(web::Json(result.to_glossary_with_who(who_))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
@@ -329,13 +332,13 @@ pub async fn get(
     pool: web::Data<DBPool>,
     id: web::Path<String>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
-    let conn2 = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
+    let mut conn2 = pool.get().expect("could not get db connection from pool");
 
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
 
-    match web::block(move || get_glossary(&conn, glossary_id)).await? {
-        Ok(g) => Ok(web::Json(g.to_glossary_with_who_from_db(&conn2))),
+    match web::block(move || get_glossary(&mut conn, glossary_id)).await? {
+        Ok(g) => Ok(web::Json(g.to_glossary_with_who_from_db(&mut conn2))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
 }
@@ -357,8 +360,8 @@ pub async fn update(
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
 
     match web::block(move || {
-        let conn = pool.get().expect("could not get db connection from pool");
-        update_glossary(&conn, glossary_id, value.to_glossary().unwrap(), who)
+        let mut conn = pool.get().expect("could not get db connection from pool");
+        update_glossary(&mut conn, glossary_id, value.to_glossary().unwrap(), who)
     })
     .await?
     {
@@ -373,10 +376,10 @@ pub async fn delete(
     pool: web::Data<DBPool>,
     id: web::Path<String>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
 
-    match web::block(move || delete_glossary(&conn, glossary_id)).await? {
+    match web::block(move || delete_glossary(&mut conn, glossary_id)).await? {
         Ok(_) => Ok(web::Json(Message::new("deleted"))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
@@ -393,11 +396,11 @@ pub async fn list_popular(
     pool: web::Data<DBPool>,
     query: web::Query<PopularQuery>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     let glossaries = web::block(move || {
         let limit = query.limit;
-        list_popular_glossary(&conn, limit)
+        list_popular_glossary(&mut conn, limit)
     })
     .await?;
 
@@ -437,7 +440,7 @@ mod tests {
     async fn test_list_glossary() {
         let ctx = TestContext::new("test_list_glossary");
         let pool = web::Data::new(ctx.get_pool());
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
 
         let item_1 = GlossaryDB {
             id: Uuid::new_v4(),
@@ -459,11 +462,11 @@ mod tests {
         // Insert two glossaries
         diesel::insert_into(glossary::table)
             .values(item_1)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
         diesel::insert_into(glossary::table)
             .values(item_2)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         let app = test::init_service(App::new().app_data(pool).service(list)).await;
@@ -491,7 +494,7 @@ mod tests {
     async fn test_get_glossary() {
         let ctx = TestContext::new("test_get_glossary");
         let pool = web::Data::new(ctx.get_pool());
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
 
         let glossary_id = Uuid::new_v4();
         let api_url = format!("/glossary/{}", glossary_id);
@@ -508,7 +511,7 @@ mod tests {
         // Insert two glossaries
         diesel::insert_into(glossary::table)
             .values(item)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         let app = test::init_service(App::new().app_data(pool).service(get)).await;
@@ -750,7 +753,7 @@ mod tests {
     async fn test_list_popular_glossaries_with_inserted_glossaries() {
         let ctx = TestContext::new("test_list_popular_glossaries_with_inserted_glossaries");
         let pool = web::Data::new(ctx.get_pool());
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().expect("could not get connection from pool");
 
         let app = test::init_service(
             App::new()
@@ -776,7 +779,7 @@ mod tests {
         assert_eq!(response_of_create.revision, 0);
 
         let glossary_id = Uuid::from_str(&response_of_create.id).unwrap();
-        let _ = create_like(&conn, glossary_id, None);
+        let _ = create_like(&mut conn, glossary_id, None);
 
         // Get the list popular
         let req = test::TestRequest::get().uri("/glossary-popular");

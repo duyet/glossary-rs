@@ -1,9 +1,10 @@
-use crate::diesel::Connection;
-use crate::diesel::RunQueryDsl;
-use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
-use diesel::sql_query;
-use diesel_migrations::embed_migrations;
+use crate::diesel::{Connection, RunQueryDsl};
+use diesel::{
+    pg::PgConnection,
+    r2d2::{ConnectionManager, Pool},
+    sql_query,
+};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::env;
 
 use crate::DBPool;
@@ -14,7 +15,7 @@ pub struct TestContext {
     db_name: String,
 }
 
-embed_migrations!("migrations/");
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/");
 
 impl TestContext {
     pub fn new(db_name: &str) -> Self {
@@ -24,17 +25,19 @@ impl TestContext {
         println!("Note: please set `TEST_DATABASE_URL` to change this behavior.\n");
 
         let database_url = format!("{}/postgres", base_url);
-        let conn = PgConnection::establish(&database_url).expect("Could not connect to database");
+        let mut conn = PgConnection::establish(&database_url).expect("Could not connect to database");
 
         // Create database
         sql_query(format!("CREATE DATABASE {}", db_name).as_str())
-            .execute(&conn)
+            .execute(&mut conn)
             .expect("Failed to create database");
 
         // Migation
-        let conn_migrations = PgConnection::establish(&format!("{}/{}", base_url, db_name))
+        let conn_migrations = &mut PgConnection::establish(&format!("{}/{}", base_url, db_name))
             .unwrap_or_else(|_| panic!("Could not connect to database {}", db_name));
-        embedded_migrations::run(&conn_migrations).expect("Failed to run migrations");
+        conn_migrations
+            .run_pending_migrations(MIGRATIONS)
+            .expect("Failed to run migrations");
 
         Self {
             conn,
@@ -63,6 +66,8 @@ impl Drop for TestContext {
     fn drop(&mut self) {
         println!("Dropping test database {}", self.db_name);
 
+        let conn = &mut self.conn;
+
         // Postgres will refuse to delete a database
         // if there is any connected user
         sql_query(format!(
@@ -71,12 +76,12 @@ impl Drop for TestContext {
                 WHERE datname = '{}';",
             self.db_name
         ))
-        .execute(&self.conn)
+        .execute(conn)
         .unwrap();
 
         // Drop the database
         sql_query(format!("DROP DATABASE {}", self.db_name).as_str())
-            .execute(&self.conn)
+            .execute(conn)
             .unwrap_or_else(|_| panic!("Couldn't drop database {}", self.db_name));
     }
 }
