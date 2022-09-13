@@ -9,7 +9,7 @@ actix-cors = "0.6.2"
 actix-web = "4.2.1"
 actix-web-validator = "4.0.0"
 ammonia = "3"
-anyhow = "1.0.64"
+anyhow = "1.0.65"
 chrono = { version = "0.4", features = ["serde"] }
 diesel = { version = "2", features = ["postgres", "extras", "uuid"] }
 diesel_migrations = "2"
