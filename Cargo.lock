@@ -200,9 +200,9 @@ dependencies = [
 
 [[package]]
 name = "actix-web-validator"
-version = "4.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "321088fa7cc752a82cf21330d2a12e6e15c98a23e14e991b7823d480d71ed783"
+checksum = "f40ee5ed4e266dad8d980f964c5ddd746f1f4f85b7f3b54f7099ab861ec6d746"
 dependencies = [
  "actix-http",
  "actix-router",
@@ -1500,9 +1500,9 @@ dependencies = [
 
 [[package]]
 name = "serde_qs"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dfafda9a9479d9ac6188b6fc1f84b850cd3f3b5faff6d13e6e45d1296e92ee8"
+checksum = "8cac3f1e2ca2fe333923a1ae72caca910b98ed0630bb35ef6f8c8517d6e81afa"
 dependencies = [
  "actix-web",
  "futures",
@@ -1823,9 +1823,9 @@ dependencies = [
 
 [[package]]
 name = "validator"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f07b0a1390e01c0fc35ebb26b28ced33c9a3808f7f9fbe94d3cc01e233bfeed5"
+checksum = "32ad5bf234c7d3ad1042e5252b7eddb2c4669ee23f32c7dd0e9b7705f07ef591"
 dependencies = [
  "idna",
  "lazy_static",
@@ -1839,9 +1839,9 @@ dependencies = [
 
 [[package]]
 name = "validator_derive"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea7ed5e8cf2b6bdd64a6c4ce851da25388a89327b17b88424ceced6bd5017923"
+checksum = "bc44ca3088bb3ba384d9aecf40c6a23a676ce23e09bdaca2073d99c207f864af"
 dependencies = [
  "if_chain",
  "lazy_static",
@@ -1855,9 +1855,9 @@ dependencies = [
 
 [[package]]
 name = "validator_types"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ddf34293296847abfc1493b15c6e2f5d3cd19f57ad7d22673bf4c6278da329"
+checksum = "111abfe30072511849c5910134e8baf8dc05de4c0e5903d681cbd5c9c4d611e3"
 dependencies = [
  "proc-macro2",
  "syn",
