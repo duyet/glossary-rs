@@ -6,11 +6,15 @@ on:
   push:
     branches:
       - master
+      - main
     tags:
       - "v*.*.*"
   pull_request:
     branches:
       - master
+      - main
+  release:
+    types: [published]
 
 env:
   CARGO_TERM_COLOR: always
@@ -87,7 +91,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'release' || github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
