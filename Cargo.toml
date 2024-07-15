@@ -7,7 +7,7 @@ authors = ["Duyet <me@duyet.net>"]
 [dependencies]
 actix-cors = "0.7.0"
 actix-web = "4.5.1"
-actix-web-validator = "5.0.1"
+actix-web-validator = "6.0.0"
 ammonia = "4"
 anyhow = "1.0.82"
 chrono = { version = "0.4", features = ["serde"] }
