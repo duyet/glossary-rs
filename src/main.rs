@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_web::{get, middleware, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, get, middleware, web, App, Error, HttpResponse, HttpServer, Responder};
 use diesel::{
     pg::PgConnection,
     r2d2::{ConnectionManager, Pool},
@@ -11,9 +11,79 @@ use std::env;
 
 use glossary::{response, v1};
 
+/// Middleware to add security headers to all responses
+fn add_security_headers(
+    req: ServiceRequest,
+    srv: &mut dyn actix_web::dev::Service<
+        ServiceRequest,
+        Response = ServiceResponse,
+        Error = Error,
+    >,
+) -> actix_web::dev::ServiceFuture<ServiceResponse, Error> {
+    use actix_web::dev::Service;
+
+    let fut = srv.call(req);
+
+    Box::pin(async move {
+        let mut res = fut.await?;
+
+        let headers = res.headers_mut();
+
+        // Prevent clickjacking attacks
+        headers.insert(
+            actix_web::http::header::HeaderName::from_static("x-frame-options"),
+            actix_web::http::HeaderValue::from_static("DENY"),
+        );
+
+        // Prevent MIME type sniffing
+        headers.insert(
+            actix_web::http::header::HeaderName::from_static("x-content-type-options"),
+            actix_web::http::header::HeaderValue::from_static("nosniff"),
+        );
+
+        // Enable XSS protection
+        headers.insert(
+            actix_web::http::header::HeaderName::from_static("x-xss-protection"),
+            actix_web::http::header::HeaderValue::from_static("1; mode=block"),
+        );
+
+        // Referrer policy
+        headers.insert(
+            actix_web::http::header::HeaderName::from_static("referrer-policy"),
+            actix_web::http::header::HeaderValue::from_static("strict-origin-when-cross-origin"),
+        );
+
+        // Content Security Policy
+        headers.insert(
+            actix_web::http::header::HeaderName::from_static("content-security-policy"),
+            actix_web::http::header::HeaderValue::from_static(
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+            ),
+        );
+
+        Ok(res)
+    })
+}
+
 #[get("/")]
 pub async fn index() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/index.html"))
+}
+
+#[get("/styles.css")]
+pub async fn styles() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/css; charset=utf-8")
+        .body(include_str!("../static/styles.css"))
+}
+
+#[get("/app.js")]
+pub async fn app_js() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(include_str!("../static/app.js"))
 }
 
 #[get("/ping")]
@@ -59,13 +129,29 @@ async fn main() -> std::io::Result<()> {
             ))
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
+            // Security headers middleware
+            .wrap(
+                middleware::DefaultHeaders::new()
+                    .add(("X-Frame-Options", "DENY"))
+                    .add(("X-Content-Type-Options", "nosniff"))
+                    .add(("X-XSS-Protection", "1; mode=block"))
+                    .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+                    .add(("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"))
+            )
             .wrap(cors)
             .service(index)
+            .service(styles)
+            .service(app_js)
             .service(ping)
+            // Health check endpoints for monitoring and orchestration
+            .service(v1::health::health_check)
+            .service(v1::health::readiness_check)
+            .service(v1::health::liveness_check)
             .service(
                 web::scope("/api/v1")
                     .service(v1::glossary::list)
                     .service(v1::glossary::list_popular)
+                    .service(v1::glossary::search)
                     .service(v1::glossary::get)
                     .service(v1::glossary::update)
                     .service(v1::glossary::delete)

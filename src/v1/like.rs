@@ -9,7 +9,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
-    response::{ErrorResp, ListResp, Message},
+    response::{ApiError, ErrorResp, ListResp, Message},
     schema::*,
     DBPool,
 };
@@ -84,25 +84,23 @@ pub fn create_like(
     conn: &mut PgConnection,
     _glossary_id: Uuid,
     _who: Option<String>,
-) -> Result<Like, ErrorResp> {
+) -> Result<Like, Error> {
     use crate::schema::likes::dsl::*;
 
     let like = Like::new(_who);
 
-    match diesel::insert_into(likes)
+    diesel::insert_into(likes)
         .values(&like.to_like_db(_glossary_id))
-        .execute(conn)
-    {
-        Ok(_) => Ok(like),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
+        .execute(conn)?;
+
+    Ok(like)
 }
 
 pub fn delete_one_like(
     conn: &mut PgConnection,
     _glossary_id: Uuid,
     _like_id: Option<Uuid>,
-) -> Result<(), ErrorResp> {
+) -> Result<(), Error> {
     use crate::schema::likes::dsl::*;
 
     let like: Option<Like> = if let Some(like_id) = _like_id {
@@ -122,12 +120,8 @@ pub fn delete_one_like(
     }
 
     let like_id = Uuid::from_str(like.unwrap().id.as_str()).unwrap();
-
-    let res = diesel::delete(likes.filter(id.eq(like_id))).execute(conn);
-    match res {
-        Ok(_) => Ok(()),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
+    diesel::delete(likes.filter(id.eq(like_id))).execute(conn)?;
+    Ok(())
 }
 
 /// List likes for a glossary id
@@ -135,16 +129,14 @@ pub fn delete_one_like(
 pub async fn list(
     id: web::Path<String>,
     pool: web::Data<DBPool>,
-) -> actix_web::Result<impl Responder, ErrorResp> {
+) -> actix_web::Result<impl Responder, ApiError> {
     let mut conn = pool.get().expect("could not get db connection from pool");
 
-    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
-    let likes = web::block(move || list_likes(&mut conn, glossary_id)).await?;
+    let glossary_id = Uuid::from_str(&id)
+        .map_err(|_| ApiError::invalid_input("Invalid glossary ID format"))?;
 
-    match likes {
-        Ok(lks) => Ok(web::Json(Likes::from(&lks))),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
+    let likes = web::block(move || list_likes(&mut conn, glossary_id)).await??;
+    Ok(web::Json(Likes::from(&likes)))
 }
 
 /// Add one like to a glossary `/glossary/{id}/likes`
@@ -153,7 +145,7 @@ pub async fn plus_one(
     id: web::Path<String>,
     pool: web::Data<DBPool>,
     req: HttpRequest,
-) -> actix_web::Result<impl Responder, ErrorResp> {
+) -> actix_web::Result<impl Responder, ApiError> {
     let mut conn = pool.get().expect("could not get db connection from pool");
 
     let who = req
@@ -161,13 +153,11 @@ pub async fn plus_one(
         .get(crate::AUTHENTICATED_USER_HEADER)
         .map(|email| email.to_str().unwrap().to_string());
 
-    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
-    let like = web::block(move || create_like(&mut conn, glossary_id, who)).await?;
+    let glossary_id = Uuid::from_str(&id)
+        .map_err(|_| ApiError::invalid_input("Invalid glossary ID format"))?;
 
-    match like {
-        Ok(like) => Ok(web::Json(like)),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
+    let like = web::block(move || create_like(&mut conn, glossary_id, who)).await??;
+    Ok(web::Json(like))
 }
 
 /// Delete one like from a glossary `/glossary/{glossary_id}/likes`
@@ -175,15 +165,14 @@ pub async fn plus_one(
 pub async fn minus_one(
     id: web::Path<String>,
     pool: web::Data<DBPool>,
-) -> actix_web::Result<impl Responder, ErrorResp> {
+) -> actix_web::Result<impl Responder, ApiError> {
     let mut conn = pool.get().expect("could not get db connection from pool");
 
-    let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
+    let glossary_id = Uuid::from_str(&id)
+        .map_err(|_| ApiError::invalid_input("Invalid glossary ID format"))?;
 
-    match web::block(move || delete_one_like(&mut conn, glossary_id, None)).await {
-        Ok(_) => Ok(web::Json(Message::new("ok"))),
-        Err(e) => Err(ErrorResp::new(&e.to_string())),
-    }
+    web::block(move || delete_one_like(&mut conn, glossary_id, None)).await??;
+    Ok(web::Json(Message::new("ok")))
 }
 
 // Tests
@@ -383,9 +372,8 @@ mod tests {
         assert_eq!(response.count, 1);
     }
 
-    // Using the plus_one to create a like to non-exist glossary.
-    // Should be return 400.
-    // TODO: should be return 404
+    // Using the plus_one to create a like for non-existent glossary
+    // Should return 409 CONFLICT (foreign key constraint violation)
     #[actix_rt::test]
     async fn one_like_non_exists_glossary() {
         let ctx = TestContext::new("one_like_non_exists_glossary");
@@ -409,7 +397,8 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), http::StatusCode::BAD_REQUEST);
+        // Foreign key violation returns 409 CONFLICT
+        assert_eq!(resp.status(), http::StatusCode::CONFLICT);
     }
 
     // Insert a glossary into database. Using the plus_one to create a like.
