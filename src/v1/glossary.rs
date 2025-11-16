@@ -1,10 +1,10 @@
 use actix_web::{delete, get, post, put, web, HttpRequest, Responder};
 use actix_web_validator::Json;
 use ammonia::clean;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use diesel::{
-    pg::PgConnection, result::Error, ExpressionMethods, Insertable, QueryDsl, Queryable,
-    RunQueryDsl,
+    pg::PgConnection, result::Error, ExpressionMethods, Insertable, PgTextExpressionMethods,
+    QueryDsl, Queryable, RunQueryDsl,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, str::FromStr};
@@ -16,7 +16,7 @@ use super::{
     like::{list_likes, Like},
 };
 use crate::{
-    response::{ApiError, ErrorResp, ListResp, Message},
+    response::{ApiError, ListResp, Message},
     schema::*,
     DBPool,
 };
@@ -100,8 +100,8 @@ impl GlossaryDB {
             likes: vec![],
             likes_count: 0,
             who: None,
-            created_at: DateTime::<Utc>::from_utc(self.created_at, Utc),
-            updated_at: DateTime::<Utc>::from_utc(self.updated_at, Utc),
+            created_at: Utc.from_utc_datetime(&self.created_at),
+            updated_at: Utc.from_utc_datetime(&self.updated_at),
         }
     }
 

@@ -1,5 +1,5 @@
 use actix_web::{delete, get, post, web, HttpRequest, Responder, Result};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use diesel::{
     pg::PgConnection, result::Error, ExpressionMethods, Insertable, QueryDsl, Queryable,
     RunQueryDsl,
@@ -9,7 +9,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
-    response::{ApiError, ErrorResp, ListResp, Message},
+    response::{ApiError, ListResp, Message},
     schema::*,
     DBPool,
 };
@@ -61,7 +61,7 @@ impl LikeDB {
     pub fn to_like(&self) -> Like {
         Like {
             id: self.id.to_string(),
-            created_at: DateTime::<Utc>::from_utc(self.created_at, Utc),
+            created_at: Utc.from_utc_datetime(&self.created_at),
             who: self.who.clone(),
         }
     }
