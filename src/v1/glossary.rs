@@ -3,8 +3,8 @@ use actix_web_validator::Json;
 use ammonia::clean;
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use diesel::{
-    pg::PgConnection, result::Error, ExpressionMethods, Insertable, PgTextExpressionMethods,
-    QueryDsl, Queryable, RunQueryDsl,
+    pg::PgConnection, result::Error, BoolExpressionMethods, ExpressionMethods, Insertable,
+    PgTextExpressionMethods, QueryDsl, Queryable, RunQueryDsl,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, str::FromStr};
