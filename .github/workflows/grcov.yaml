@@ -3,12 +3,8 @@ name: Code coverage
 on: [push, pull_request]
 
 jobs:
-  grcov:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
+  coverage:
+    runs-on: ubuntu-latest
 
     services:
       postgres:
@@ -29,34 +25,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install toolchain
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
-          override: true
+          toolchain: stable
           profile: minimal
+          override: true
+          components: llvm-tools-preview
 
-      - name: Execute tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
         env:
-          CARGO_INCREMENTAL: 0
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost
 
-      - name: Pre-installing grcov
-        uses: actions-rs/install@v0.1
-        with:
-          crate: grcov
-          use-tool-cache: true
-
-      - name: Gather coverage data
-        id: coverage
-        uses: actions-rs/grcov@v0.1
-
-      - name: Codecov.io upload
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ${{ steps.coverage.outputs.report }}
+          files: lcov.info
+          fail_ci_if_error: false
+
