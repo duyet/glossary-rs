@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_web::{dev::ServiceRequest, dev::ServiceResponse, get, middleware, web, App, Error, HttpResponse, HttpServer, Responder};
+use actix_web::{get, middleware, web, App, HttpResponse, HttpServer, Responder};
 use diesel::{
     pg::PgConnection,
     r2d2::{ConnectionManager, Pool},
@@ -10,60 +10,6 @@ use log::info;
 use std::env;
 
 use glossary::{response, v1};
-
-/// Middleware to add security headers to all responses
-fn add_security_headers(
-    req: ServiceRequest,
-    srv: &mut dyn actix_web::dev::Service<
-        ServiceRequest,
-        Response = ServiceResponse,
-        Error = Error,
-    >,
-) -> actix_web::dev::ServiceFuture<ServiceResponse, Error> {
-    use actix_web::dev::Service;
-
-    let fut = srv.call(req);
-
-    Box::pin(async move {
-        let mut res = fut.await?;
-
-        let headers = res.headers_mut();
-
-        // Prevent clickjacking attacks
-        headers.insert(
-            actix_web::http::header::HeaderName::from_static("x-frame-options"),
-            actix_web::http::HeaderValue::from_static("DENY"),
-        );
-
-        // Prevent MIME type sniffing
-        headers.insert(
-            actix_web::http::header::HeaderName::from_static("x-content-type-options"),
-            actix_web::http::header::HeaderValue::from_static("nosniff"),
-        );
-
-        // Enable XSS protection
-        headers.insert(
-            actix_web::http::header::HeaderName::from_static("x-xss-protection"),
-            actix_web::http::header::HeaderValue::from_static("1; mode=block"),
-        );
-
-        // Referrer policy
-        headers.insert(
-            actix_web::http::header::HeaderName::from_static("referrer-policy"),
-            actix_web::http::header::HeaderValue::from_static("strict-origin-when-cross-origin"),
-        );
-
-        // Content Security Policy
-        headers.insert(
-            actix_web::http::header::HeaderName::from_static("content-security-policy"),
-            actix_web::http::header::HeaderValue::from_static(
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
-            ),
-        );
-
-        Ok(res)
-    })
-}
 
 #[get("/")]
 pub async fn index() -> impl Responder {
