@@ -1,9 +1,12 @@
 <div align="center">
   <img src=".github/logo.png" alt="Glossary Logo" width="100" />
-  <h1>Glossary API</h1>
+  <h1>Glossary</h1>
   <p>
-    Open-Source Glossary API Service written in Rust, 
-    powered by https://actix.rs and https://diesel.rs.
+    <strong>Production-ready glossary service with beautiful UI</strong>
+  </p>
+  <p>
+    Open-source knowledge base built with Rust 🦀<br/>
+    Powered by <a href="https://actix.rs">Actix-web</a> and <a href="https://diesel.rs">Diesel</a>
   </p>
   <p>
     <a href="https://github.com/duyet/glossary-rs/actions/workflows/build-test.yaml">
@@ -18,19 +21,61 @@
   </p>
 </div>
 
-# Endpoints
+## ✨ Features
 
-| Method | Endpoint | What it does |
-| ------ | -------- | -------------|
-| GET | ```/api/v1/glossary``` | Returns a dictionary of glossary with key is the first character of glossary terms.
-| GET | ```/api/v1/glossary-popular``` | Returns an array of most popular terms by likes.
-| GET |  ```/api/v1/glossary/{id}``` | Return the glossary term and defintion.
-| POST | ```/api/v1/glossary``` | Create a new glossary with `term` and `defintion`.
-| PUT | ```/api/v1/glossary/{id}``` | Update a glossary.
-| DELETE | ```/api/v1/glossary/{id}``` | Delete a glossary.
-| GET | ```/api/v1/glossary/{id}/likes``` | Return an array of likes for a glossary.
-| POST | ```/api/v1/glossary/{id}/likes``` | Create a like for a glossary.
-| DELETE | ```/api/v1/glossary/{id}/likes``` | Delete a like from a glossary.
+### 🎨 Modern Web Interface
+- **Beautiful responsive design** with automatic dark mode
+- **Real-time search** across terms and definitions
+- **Alphabetically organized** glossary view
+- **Popular terms** sidebar with like counts
+- **Interactive like system** to highlight important definitions
+- **Mobile-first** responsive design
+
+### 🚀 Production-Ready API
+- **Semantic HTTP status codes** (404, 409, 422, 500)
+- **RESTful design** with proper error handling
+- **Search functionality** with fuzzy matching
+- **Health check endpoints** for monitoring & K8s
+- **Immutable audit history** tracking all changes
+- **Optimistic locking** with revision numbers
+
+### 🛡️ Security & Performance
+- **Security headers** (CSP, X-Frame-Options, X-XSS-Protection)
+- **Database indexes** for optimized queries
+- **ON DELETE CASCADE** for referential integrity
+- **HTML sanitization** with Ammonia (XSS protection)
+- **CORS support** for cross-origin requests
+- **Response compression** with gzip/brotli
+
+## 📚 API Endpoints
+
+### Glossary Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/glossary` | List all terms grouped by first letter |
+| GET | `/api/v1/glossary-popular?limit=10` | Get most liked terms |
+| GET | `/api/v1/glossary-search?q=query` | 🔍 **NEW** Search terms and definitions |
+| GET | `/api/v1/glossary/{id}` | Get specific term details |
+| POST | `/api/v1/glossary` | Create new term |
+| PUT | `/api/v1/glossary/{id}` | Update existing term |
+| DELETE | `/api/v1/glossary/{id}` | Delete term |
+
+### Likes & Engagement
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/glossary/{id}/likes` | Get all likes for a term |
+| POST | `/api/v1/glossary/{id}/likes` | Like a term |
+| DELETE | `/api/v1/glossary/{id}/likes` | Remove like |
+
+### Health & Monitoring
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | 🏥 **NEW** Health check with DB status |
+| GET | `/ready` | 🎯 **NEW** Kubernetes readiness probe |
+| GET | `/live` | 💓 **NEW** Kubernetes liveness probe |
 
 
 # Development
