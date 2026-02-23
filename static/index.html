@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glossary - Your Team's Knowledge Base</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="header-content">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="32" height="32" rx="8" fill="currentColor" opacity="0.1"/>
+                        <path d="M16 8V24M10 14H22M12 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <h1>Glossary</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+                        <svg class="sun-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                            <circle cx="10" cy="10" r="3" stroke="currentColor" stroke-width="2"/>
+                            <path d="M10 2V4M10 16V18M18 10H16M4 10H2M15.657 4.343L14.243 5.757M5.757 14.243L4.343 15.657M15.657 15.657L14.243 14.243M5.757 5.757L4.343 4.343" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <svg class="moon-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                            <path d="M17 10.5C16.25 14.5 12.5 17 8.5 17C4.5 17 1 13.5 1 9.5C1 5.5 3.5 1.75 7.5 1C6.5 2.5 6 4.5 6 6.5C6 10.5 9.5 14 13.5 14C14.5 14 15.5 13.75 16.5 13.25C16.75 13.5 17 14 17 10.5Z" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                    <button class="btn btn-primary" id="newTermBtn">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M8 3V13M3 8H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        New Term
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Search Bar -->
+        <div class="search-container">
+            <div class="search-box">
+                <svg class="search-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+                    <path d="M12.5 12.5L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <input type="text" id="searchInput" placeholder="Search terms or definitions..." />
+                <button class="search-clear" id="searchClear" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="search-stats" id="searchStats"></div>
+        </div>
+
+        <!-- Main Content -->
+        <main id="mainContent">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Loading glossary...</p>
+            </div>
+
+            <div class="alphabet-grid" id="alphabetGrid" style="display: none;"></div>
+
+            <div class="search-results" id="searchResults" style="display: none;"></div>
+
+            <div class="empty-state" id="emptyState" style="display: none;">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                    <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2" opacity="0.2"/>
+                    <path d="M32 20V32M32 38V39" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+                <h3>No terms found</h3>
+                <p>Start building your knowledge base by adding your first term.</p>
+                <button class="btn btn-primary">Add First Term</button>
+            </div>
+        </main>
+
+        <!-- Popular Terms Sidebar -->
+        <aside class="popular-sidebar" id="popularSidebar">
+            <h3>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M8 2L9.5 6.5L14 8L9.5 9.5L8 14L6.5 9.5L2 8L6.5 6.5L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Popular Terms
+            </h3>
+            <div id="popularList"></div>
+        </aside>
+    </div>
+
+    <!-- Modal for Adding/Editing Terms -->
+    <div class="modal" id="termModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">New Term</h2>
+                <button class="modal-close" id="modalClose">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+            <form id="termForm">
+                <div class="form-group">
+                    <label for="termName">Term</label>
+                    <input type="text" id="termName" required placeholder="e.g., API, Microservices, CI/CD">
+                </div>
+                <div class="form-group">
+                    <label for="termDefinition">Definition</label>
+                    <textarea id="termDefinition" required rows="6" placeholder="Provide a clear, concise definition..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Term</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
