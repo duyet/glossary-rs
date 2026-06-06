@@ -55,7 +55,7 @@ If your database requires a password, update `DATABASE_URL` to be of the form:
 DATABASE_URL=postgres://username:password@localhost/glossary
 ```
 
-Hint: on MacOS, please prefer to use https://postgres.app
+Tip: on MacOS, please prefer to use https://postgres.app
 
 Then to create and set-up the database run:
 

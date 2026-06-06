@@ -1,14 +1,18 @@
 use actix_web::{delete, get, post, web, HttpRequest, Responder, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use diesel::result::Error;
-use diesel::{ExpressionMethods, Insertable, QueryDsl, Queryable, RunQueryDsl};
+use diesel::{
+    pg::PgConnection, result::Error, ExpressionMethods, Insertable, QueryDsl, Queryable,
+    RunQueryDsl,
+};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use uuid::Uuid;
 
-use crate::response::{ErrorResp, ListResp, Message};
-use crate::schema::*;
-use crate::{DBPool, DBPooledConnection};
+use crate::{
+    response::{ErrorResp, ListResp, Message},
+    schema::*,
+    DBPool,
+};
 
 pub type Likes = ListResp<Like>;
 
@@ -45,7 +49,7 @@ impl Like {
 }
 
 #[derive(Queryable, Insertable)]
-#[table_name = "likes"]
+#[diesel(table_name = likes)]
 pub struct LikeDB {
     pub id: Uuid,
     pub created_at: NaiveDateTime,
@@ -63,7 +67,7 @@ impl LikeDB {
     }
 }
 
-pub fn list_likes(conn: &DBPooledConnection, _glossary_id: Uuid) -> Result<Vec<Like>, Error> {
+pub fn list_likes(conn: &mut PgConnection, _glossary_id: Uuid) -> Result<Vec<Like>, Error> {
     use crate::schema::likes::dsl::*;
 
     match likes
@@ -77,7 +81,7 @@ pub fn list_likes(conn: &DBPooledConnection, _glossary_id: Uuid) -> Result<Vec<L
 }
 
 pub fn create_like(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     _glossary_id: Uuid,
     _who: Option<String>,
 ) -> Result<Like, ErrorResp> {
@@ -95,7 +99,7 @@ pub fn create_like(
 }
 
 pub fn delete_one_like(
-    conn: &DBPooledConnection,
+    conn: &mut PgConnection,
     _glossary_id: Uuid,
     _like_id: Option<Uuid>,
 ) -> Result<(), ErrorResp> {
@@ -132,10 +136,10 @@ pub async fn list(
     id: web::Path<String>,
     pool: web::Data<DBPool>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
-    let likes = web::block(move || list_likes(&conn, glossary_id)).await?;
+    let likes = web::block(move || list_likes(&mut conn, glossary_id)).await?;
 
     match likes {
         Ok(lks) => Ok(web::Json(Likes::from(&lks))),
@@ -150,7 +154,7 @@ pub async fn plus_one(
     pool: web::Data<DBPool>,
     req: HttpRequest,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     let who = req
         .headers()
@@ -158,7 +162,7 @@ pub async fn plus_one(
         .map(|email| email.to_str().unwrap().to_string());
 
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
-    let like = web::block(move || create_like(&conn, glossary_id, who)).await?;
+    let like = web::block(move || create_like(&mut conn, glossary_id, who)).await?;
 
     match like {
         Ok(like) => Ok(web::Json(like)),
@@ -172,11 +176,11 @@ pub async fn minus_one(
     id: web::Path<String>,
     pool: web::Data<DBPool>,
 ) -> actix_web::Result<impl Responder, ErrorResp> {
-    let conn = pool.get().expect("could not get db connection from pool");
+    let mut conn = pool.get().expect("could not get db connection from pool");
 
     let glossary_id = Uuid::from_str(&id).map_err(|_| ErrorResp::new("invalid glossary id"))?;
 
-    match web::block(move || delete_one_like(&conn, glossary_id, None)).await {
+    match web::block(move || delete_one_like(&mut conn, glossary_id, None)).await {
         Ok(_) => Ok(web::Json(Message::new("ok"))),
         Err(e) => Err(ErrorResp::new(&e.to_string())),
     }
@@ -292,7 +296,7 @@ mod tests {
 
         let ctx = TestContext::new("list_like_empty");
         let pool = ctx.get_pool();
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
 
         let glossary_id = Uuid::new_v4();
         let item = GlossaryDB {
@@ -307,7 +311,7 @@ mod tests {
         // Insert glossary item into database
         diesel::insert_into(glossary::table)
             .values(item)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         // Init api test server
@@ -337,7 +341,7 @@ mod tests {
 
         let ctx = TestContext::new("one_like");
         let pool = ctx.get_pool();
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
         let glossary_id = Uuid::new_v4();
 
         let item = GlossaryDB {
@@ -352,7 +356,7 @@ mod tests {
         // Insert to glossaries
         diesel::insert_into(glossary::table)
             .values(item)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         let app = test::init_service(
@@ -417,7 +421,7 @@ mod tests {
 
         let ctx = TestContext::new("like_two_times");
         let pool = ctx.get_pool();
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
 
         let glossary_id = Uuid::new_v4();
 
@@ -433,7 +437,7 @@ mod tests {
         // Insert two glossaries
         diesel::insert_into(glossary::table)
             .values(item_1)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         let app = test::init_service(
@@ -471,7 +475,7 @@ mod tests {
 
         let ctx = TestContext::new("like_then_unlike");
         let pool = ctx.get_pool();
-        let conn = pool.get().expect("could not get db connection from pool");
+        let conn = &mut pool.get().expect("could not get db connection from pool");
 
         let glossary_id = Uuid::new_v4();
 
@@ -487,7 +491,7 @@ mod tests {
         // Insert two glossaries
         diesel::insert_into(glossary::table)
             .values(item_1)
-            .execute(&conn)
+            .execute(conn)
             .expect("could not insert glossary");
 
         let app = test::init_service(

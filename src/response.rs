@@ -1,5 +1,7 @@
-use actix_web::error::{ResponseError, BlockingError};
-use actix_web::{error, HttpRequest, HttpResponse};
+use actix_web::{
+    error::{self, BlockingError, ResponseError},
+    HttpRequest, HttpResponse,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
