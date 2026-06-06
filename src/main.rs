@@ -13,7 +13,23 @@ use glossary::{response, v1};
 
 #[get("/")]
 pub async fn index() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/index.html"))
+}
+
+#[get("/styles.css")]
+pub async fn styles() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("text/css; charset=utf-8")
+        .body(include_str!("../static/styles.css"))
+}
+
+#[get("/app.js")]
+pub async fn app_js() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(include_str!("../static/app.js"))
 }
 
 #[get("/ping")]
@@ -59,13 +75,29 @@ async fn main() -> std::io::Result<()> {
             ))
             .wrap(middleware::Compress::default())
             .wrap(middleware::Logger::default())
+            // Security headers middleware
+            .wrap(
+                middleware::DefaultHeaders::new()
+                    .add(("X-Frame-Options", "DENY"))
+                    .add(("X-Content-Type-Options", "nosniff"))
+                    .add(("X-XSS-Protection", "1; mode=block"))
+                    .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+                    .add(("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"))
+            )
             .wrap(cors)
             .service(index)
+            .service(styles)
+            .service(app_js)
             .service(ping)
+            // Health check endpoints for monitoring and orchestration
+            .service(v1::health::health_check)
+            .service(v1::health::readiness_check)
+            .service(v1::health::liveness_check)
             .service(
                 web::scope("/api/v1")
                     .service(v1::glossary::list)
                     .service(v1::glossary::list_popular)
+                    .service(v1::glossary::search)
                     .service(v1::glossary::get)
                     .service(v1::glossary::update)
                     .service(v1::glossary::delete)
