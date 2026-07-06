@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Rust Toolchain
         uses: actions-rs/toolchain@v1
@@ -93,7 +93,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Rust Toolchain
         uses: actions-rs/toolchain@v1
