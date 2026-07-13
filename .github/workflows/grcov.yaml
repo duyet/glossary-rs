@@ -45,7 +45,7 @@ jobs:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           fail_ci_if_error: false
